@@ -832,6 +832,7 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
     import imaplib as _imap_lib
     import email as _email_lib
     import uuid as _uuid
+    import sqlite3
     from email.header import decode_header as _decode_header
 
     SENDER = "francesca.cassiano@gtsocieta.com"
