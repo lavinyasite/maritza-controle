@@ -93,19 +93,35 @@ async def init_db():
                 last_checked  TEXT
             )
         """)
-        await db.commit()
+        # Migrações seguras
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN is_creator INTEGER NOT NULL DEFAULT 0")
+            await db.commit()
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN admin_permissions TEXT NOT NULL DEFAULT 'full_control'")
+            await db.commit()
+        except Exception:
+            pass
 
-        # Inserir admin padrão
+        # Inserir/Atualizar admin padrão como criador
         existing = await db.execute("SELECT id FROM users WHERE email = ?", (ADMIN_EMAIL,))
         if not await existing.fetchone():
             hashed = bcrypt.hashpw(b"Admin@2026!", bcrypt.gensalt()).decode()
             await db.execute("""
-                INSERT INTO users (id, name, email, password, role, lang, created_at)
-                VALUES (?, ?, ?, ?, 'admin', 'pt', ?)
+                INSERT INTO users (id, name, email, password, role, lang, created_at, is_creator, admin_permissions)
+                VALUES (?, ?, ?, ?, 'admin', 'pt', ?, 1, 'full_control')
             """, (str(uuid.uuid4()), "Maritza (Admin)", ADMIN_EMAIL, hashed,
                   datetime.utcnow().isoformat()))
             await db.commit()
             logger.info(f"✅ Admin criado: {ADMIN_EMAIL}")
+        else:
+            await db.execute("""
+                UPDATE users SET is_creator = 1, admin_permissions = 'full_control'
+                WHERE email = ?
+            """, (ADMIN_EMAIL,))
+            await db.commit()
 
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -214,6 +230,10 @@ async def require_admin(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Apenas administradores")
     return current_user
 
+def check_admin_write_permission(admin: dict):
+    if admin.get("admin_permissions") == "read_only":
+        raise HTTPException(status_code=403, detail="Apenas leitura: você não tem permissão para alterar dados.")
+
 
 # ─── Modelos ──────────────────────────────────
 class LoginRequest(BaseModel):
@@ -239,6 +259,7 @@ class CreateUserRequest(BaseModel):
     password: str
     lang: Optional[str] = "it"
     role: Optional[str] = "worker"
+    admin_permissions: Optional[str] = "full_control"
 
 class EmailSettingsRequest(BaseModel):
     email: str
@@ -310,6 +331,8 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "email": current_user["email"],
         "lang":  current_user["lang"],
         "role":  current_user["role"],
+        "admin_permissions": current_user.get("admin_permissions", "full_control"),
+        "is_creator": current_user.get("is_creator", 0),
     }
 
 
@@ -318,7 +341,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 async def admin_list_users(admin=Depends(require_admin), db=Depends(get_db)):
     """Lista todos os usuários (admin only)."""
     rows = await db.execute("""
-        SELECT id, name, email, role, lang, created_at, approved_at
+        SELECT id, name, email, role, lang, created_at, approved_at, is_creator, admin_permissions
         FROM users ORDER BY created_at DESC
     """)
     users = [dict(r) for r in await rows.fetchall()]
@@ -328,16 +351,18 @@ async def admin_list_users(admin=Depends(require_admin), db=Depends(get_db)):
 @app.post("/api/admin/users")
 async def admin_create_user(body: CreateUserRequest, admin=Depends(require_admin), db=Depends(get_db)):
     """Admin cria usuário diretamente (já aprovado)."""
+    check_admin_write_permission(admin)
     existing = await db.execute("SELECT id FROM users WHERE email = ?", (body.email,))
     if await existing.fetchone():
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     hashed = hash_password(body.password)
     user_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
+    admin_perms = body.admin_permissions or "full_control"
     await db.execute("""
-        INSERT INTO users (id, name, email, password, role, lang, created_at, approved_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, body.name, body.email, hashed, body.role, body.lang, now, now))
+        INSERT INTO users (id, name, email, password, role, lang, created_at, approved_at, admin_permissions)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, body.name, body.email, hashed, body.role, body.lang, now, now, admin_perms))
     await db.commit()
     logger.info(f"✅ Usuário criado pelo admin: {body.email}")
     return {"message": "Usuário criado com sucesso", "id": user_id}
@@ -346,6 +371,7 @@ async def admin_create_user(body: CreateUserRequest, admin=Depends(require_admin
 @app.patch("/api/admin/users/{user_id}/approve")
 async def admin_approve_user(user_id: str, admin=Depends(require_admin), db=Depends(get_db)):
     """Admin aprova um usuário pendente."""
+    check_admin_write_permission(admin)
     row = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     user = await row.fetchone()
     if not user:
@@ -361,12 +387,20 @@ async def admin_approve_user(user_id: str, admin=Depends(require_admin), db=Depe
 @app.patch("/api/admin/users/{user_id}/block")
 async def admin_block_user(user_id: str, admin=Depends(require_admin), db=Depends(get_db)):
     """Admin bloqueia/desativa um usuário."""
+    check_admin_write_permission(admin)
     row = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     user = await row.fetchone()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    if user["email"] == ADMIN_EMAIL:
-        raise HTTPException(status_code=403, detail="Não é possível bloquear o admin principal")
+    
+    # Proteger o criador principal
+    if user["is_creator"] == 1 or user["email"] == ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Não é possível bloquear o administrador principal")
+        
+    # Impedir administrador comum de bloquear outros administradores
+    if user["role"] == "admin" and not admin.get("is_creator") and admin["email"] != ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Apenas o administrador principal pode bloquear outros administradores")
+        
     await db.execute("UPDATE users SET role = 'blocked' WHERE id = ?", (user_id,))
     await db.commit()
     return {"message": f"Usuário {user['name']} bloqueado"}
@@ -375,12 +409,20 @@ async def admin_block_user(user_id: str, admin=Depends(require_admin), db=Depend
 @app.delete("/api/admin/users/{user_id}")
 async def admin_delete_user(user_id: str, admin=Depends(require_admin), db=Depends(get_db)):
     """Admin remove um usuário."""
+    check_admin_write_permission(admin)
     row = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     user = await row.fetchone()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    if user["email"] == ADMIN_EMAIL:
-        raise HTTPException(status_code=403, detail="Não é possível remover o admin principal")
+        
+    # Proteger o criador principal
+    if user["is_creator"] == 1 or user["email"] == ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Não é possível remover o administrador principal")
+        
+    # Impedir administrador comum de remover outros administradores
+    if user["role"] == "admin" and not admin.get("is_creator") and admin["email"] != ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Apenas o administrador principal pode remover outros administradores")
+        
     await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     await db.commit()
     return {"message": f"Usuário {user['name']} removido"}
@@ -404,6 +446,7 @@ async def get_email_settings(admin=Depends(require_admin), db=Depends(get_db)):
 
 @app.post("/api/admin/email-settings")
 async def save_email_settings(body: EmailSettingsRequest, admin=Depends(require_admin), db=Depends(get_db)):
+    check_admin_write_permission(admin)
     # 1. Testar conexão IMAP antes de salvar
     from services.email_reader import EmailReader
     reader = EmailReader(body.email, body.app_password)
@@ -881,6 +924,7 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
     Busca todos os PDFs enviados pela Francesca e salva no banco.
     Seguro: usa ON CONFLICT DO NOTHING para nunca duplicar.
     """
+    check_admin_write_permission(admin)
     import imaplib as _imap_lib
     import email as _email_lib
     import uuid as _uuid
@@ -1052,4 +1096,227 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
     except Exception as e:
         logger.error(f"[IMPORT-HIST] Erro: {e}")
         raise HTTPException(status_code=500, detail=f"Erro na importação histórica: {str(e)}")
+
+
+# ─── Novos Endpoints de Painel Admin 360 e Controle de Acesso ───────────────
+
+class UpdatePermissionsRequest(BaseModel):
+    admin_permissions: str
+
+
+@app.patch("/api/admin/users/{user_id}/permissions")
+async def admin_update_permissions(
+    user_id: str,
+    body: UpdatePermissionsRequest,
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    """Permite ao criador/admin principal alterar permissões de outros administradores ou colaboradores."""
+    check_admin_write_permission(admin)
+    if not admin.get("is_creator") and admin["email"] != ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Apenas o criador do projeto pode alterar permissões.")
+        
+    row = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = await row.fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        
+    if user["is_creator"] == 1 or user["email"] == ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="Não é possível alterar as permissões do criador do projeto.")
+        
+    if body.admin_permissions not in ("read_only", "full_control"):
+        raise HTTPException(status_code=400, detail="Permissões inválidas. Use 'read_only' ou 'full_control'.")
+        
+    await db.execute("""
+        UPDATE users SET admin_permissions = ? WHERE id = ?
+    """, (body.admin_permissions, user_id))
+    await db.commit()
+    return {"message": f"Permissões de {user['name']} atualizadas para {body.admin_permissions}."}
+
+
+@app.get("/api/admin/workers")
+async def admin_list_worker_names(admin=Depends(require_admin), db=Depends(get_db)):
+    """Retorna uma lista única de todos os nomes de trabalhadores existentes nas escalas."""
+    rows = await db.execute("SELECT DISTINCT worker_name FROM shifts ORDER BY worker_name ASC")
+    workers = [r[0] for r in await rows.fetchall() if r[0]]
+    return {"workers": workers}
+
+
+@app.get("/api/admin/all-workers-stats")
+async def get_all_workers_stats(
+    year: int = 2026,
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    """Retorna estatísticas comparativas de todos os colaboradores do ano selecionado."""
+    year_prefix = f"{year}-%"
+    
+    # Obter total de turnos e horas por trabalhador
+    rows = await db.execute("""
+        SELECT worker_name, COUNT(*) as total_shifts, SUM(duration_hours) as total_hours
+        FROM shifts
+        WHERE date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+        GROUP BY worker_name
+        ORDER BY total_shifts DESC
+    """, (year_prefix,))
+    stats_list = [dict(r) for r in await rows.fetchall()]
+    
+    if not stats_list:
+        return {
+            "workers": [],
+            "most_worked": None,
+            "least_worked": None,
+            "total_shifts_all": 0,
+            "total_hours_all": 0.0
+        }
+        
+    total_shifts_all = sum(w["total_shifts"] for w in stats_list)
+    total_hours_all = sum(w["total_hours"] or 0.0 for w in stats_list)
+    
+    most_worked = stats_list[0]
+    least_worked = stats_list[-1]
+    
+    return {
+        "workers": stats_list,
+        "most_worked": {
+            "name": most_worked["worker_name"],
+            "shifts": most_worked["total_shifts"],
+            "hours": round(most_worked["total_hours"] or 0.0, 1)
+        },
+        "least_worked": {
+            "name": least_worked["worker_name"],
+            "shifts": least_worked["total_shifts"],
+            "hours": round(least_worked["total_hours"] or 0.0, 1)
+        },
+        "total_shifts_all": total_shifts_all,
+        "total_hours_all": round(total_hours_all, 1)
+    }
+
+
+@app.get("/api/admin/worker-analytics")
+async def get_worker_analytics(
+    worker_name: str,
+    year: int = 2026,
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    """
+    Retorna o relatório analítico anual detalhado de um trabalhador específico (admin only).
+    """
+    year_prefix = f"{year}-%"
+    name_query = f"%{worker_name.strip()}%"
+    
+    # 1. Total de turnos e horas trabalhadas no ano
+    row_stats = await db.execute("""
+        SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
+        FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, year_prefix))
+    stats = dict(await row_stats.fetchone())
+    
+    # 2. Obter todas as datas trabalhadas no ano
+    row_days = await db.execute("""
+        SELECT date FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, year_prefix))
+    dates = []
+    for r in await row_days.fetchall():
+        if r[0]:
+            try:
+                dates.append(datetime.strptime(r[0], "%Y-%m-%d"))
+            except:
+                pass
+    dates = sorted(dates)
+
+    # Obter todas as datas ativas do ano
+    row_active_dates = await db.execute("""
+        SELECT DISTINCT date FROM shifts 
+        WHERE date LIKE ?
+    """, (year_prefix,))
+    active_dates = set()
+    for r in await row_active_dates.fetchall():
+        if r[0]:
+            try:
+                active_dates.add(datetime.strptime(r[0], "%Y-%m-%d").date())
+            except:
+                pass
+    
+    off_dates = []
+    total_off = 0
+    sat_worked = 0
+    sat_off = 0
+    sun_worked = 0
+    sun_off = 0
+    
+    if dates:
+        worked_dates_set = {d.date() for d in dates}
+        off_dates = sorted([d for d in active_dates if d not in worked_dates_set])
+        total_off = len(off_dates)
+        
+        for d in active_dates:
+            if d.weekday() == 5:
+                if d in worked_dates_set:
+                    sat_worked += 1
+                else:
+                    sat_off += 1
+            elif d.weekday() == 6:
+                if d in worked_dates_set:
+                    sun_worked += 1
+                else:
+                    sun_off += 1
+                    
+    # Dia mais trabalhado
+    weekday_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
+    for d in dates:
+        weekday_counts[d.weekday()] += 1
+        
+    weekday_names_pt = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    weekday_names_it = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+    
+    max_day_idx = max(weekday_counts, key=weekday_counts.get) if dates else 0
+    max_day_count = weekday_counts[max_day_idx]
+
+    # Férias/Folgas Prolongadas
+    vacations = []
+    if off_dates:
+        current_streak = [off_dates[0]]
+        for i in range(1, len(off_dates)):
+            diff = (off_dates[i] - off_dates[i-1]).days
+            if diff == 1:
+                current_streak.append(off_dates[i])
+            else:
+                if len(current_streak) >= 4:
+                    vacations.append({
+                        "start": current_streak[0].isoformat(),
+                        "end": current_streak[-1].isoformat(),
+                        "days": len(current_streak)
+                    })
+                current_streak = [off_dates[i]]
+        if len(current_streak) >= 4:
+            vacations.append({
+                "start": current_streak[0].isoformat(),
+                "end": current_streak[-1].isoformat(),
+                "days": len(current_streak)
+            })
+
+    return {
+        "worker_name": worker_name,
+        "year": year,
+        "total_shifts": stats.get("total_shifts") or 0,
+        "total_hours": stats.get("total_hours") or 0.0,
+        "total_days_off": total_off,
+        "most_worked_day": {
+            "pt": weekday_names_pt[max_day_idx] if dates else "—",
+            "it": weekday_names_it[max_day_idx] if dates else "—",
+            "count": max_day_count
+        },
+        "weekends": {
+            "saturday_worked": sat_worked,
+            "saturday_off": sat_off,
+            "sunday_worked": sun_worked,
+            "sunday_off": sun_off
+        },
+        "vacations": vacations,
+        "vacations_count": len(vacations)
+    }
 

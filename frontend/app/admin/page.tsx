@@ -7,8 +7,8 @@ import styles from "./admin.module.css";
 const T = {
   pt: {
     title: "Painel Admin",
-    subtitle: "Gestão de Usuários",
-    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário", email: "Robô de E-mail" },
+    subtitle: "Gestão & Analítico 360",
+    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário", email: "Robô de E-mail", analytics360: "Painel 360" },
     name: "Nome", email: "E-mail", lang: "Idioma", role: "Função",
     password: "Senha", confirm: "Confirmar Senha",
     approve: "Aprovar", block: "Bloquear", remove: "Remover",
@@ -45,11 +45,33 @@ const T = {
     importHistDesc: "Lê TODOS os e-mails já enviados pela Francesca (sem limite de data). Seguro: nunca duplica dados já existentes.",
     importHistSuccess: "✅ Importação concluída!",
     importHistError: "❌ Erro na importação. Verifique o robô de e-mail.",
+    permissionsLabel: "Permissões de Admin",
+    fullControl: "Poder Total",
+    readOnly: "Apenas Leitura",
+    selectWorker: "Selecionar Trabalhador",
+    summaryTitle: "Visão Comparativa de Trabalho",
+    mostWorked: "Quem Mais Trabalhou",
+    leastWorked: "Quem Menos Trabalhou",
+    totalShifts: "Total de Turnos",
+    totalHours: "Total de Horas",
+    workerDetailTitle: "Relatório Analítico 360",
+    daysWorked: "Dias Trabalhados",
+    daysOff: "Dias de Folga",
+    mostWorkedDay: "Dia Mais Escaldo",
+    saturdays: "Sábados",
+    sundays: "Domingos",
+    vacationsTitle: "Folgas Prolongadas (4+ dias)",
+    noVacations: "Nenhuma folga prolongada registrada.",
+    vacationFrom: "De",
+    vacationTo: "Até",
+    vacationDays: "dias",
+    creatorBadge: "CRIADOR DO PROJETO",
+    adminPowerLabel: "Nível de Permissão",
   },
   it: {
     title: "Pannello Admin",
-    subtitle: "Gestione Utenti",
-    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente", email: "Bot Email" },
+    subtitle: "Gestione & Analitica 360",
+    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente", email: "Bot Email", analytics360: "Pannello 360" },
     name: "Nome", email: "Email", lang: "Lingua", role: "Ruolo",
     password: "Password", confirm: "Conferma Password",
     approve: "Approva", block: "Blocca", remove: "Rimuovi",
@@ -86,6 +108,28 @@ const T = {
     importHistDesc: "Legge TUTTE le email già inviate da Francesca (senza limite di data). Sicuro: non duplica mai i dati esistenti.",
     importHistSuccess: "✅ Importazione completata!",
     importHistError: "❌ Errore nell'importazione. Controlla il bot email.",
+    permissionsLabel: "Permessi Admin",
+    fullControl: "Controllo Completo",
+    readOnly: "Solo Lettura",
+    selectWorker: "Seleziona Lavoratore",
+    summaryTitle: "Panoramica Comparativa",
+    mostWorked: "Chi ha Lavorato di Più",
+    leastWorked: "Chi ha Lavorato di Meno",
+    totalShifts: "Turni Totali",
+    totalHours: "Ore Totali",
+    workerDetailTitle: "Rapporto Analitico 360",
+    daysWorked: "Giorni Lavorati",
+    daysOff: "Giorni Liberi",
+    mostWorkedDay: "Giorno più Frequente",
+    saturdays: "Sabato",
+    sundays: "Domenica",
+    vacationsTitle: "Ferie / Pause (4+ giorni)",
+    noVacations: "Nessuna pausa prolungata registrata.",
+    vacationFrom: "Dal",
+    vacationTo: "Al",
+    vacationDays: "giorni",
+    creatorBadge: "CREATORE PROGETTO",
+    adminPowerLabel: "Livello Permessi",
   },
 };
 
@@ -105,13 +149,16 @@ function roleBadge(role: string) {
 export default function AdminPage() {
   const router = useRouter();
   const [lang, setLang] = useState<"pt" | "it">("pt");
-  const [tab, setTab] = useState<"pending" | "all" | "create" | "email">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "create" | "email" | "analytics360">("pending");
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   
+  // Logged in user info
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
   // States para formulário de usuário
-  const [form, setForm] = useState({ name: "", email: "", password: "", lang: "it", role: "worker" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", lang: "it", role: "worker", admin_permissions: "full_control" });
   const [submitting, setSubmitting] = useState(false);
 
   // States para Robô de e-mail
@@ -123,16 +170,101 @@ export default function AdminPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
 
+  // States para Painel 360
+  const [workersList, setWorkersList] = useState<string[]>([]);
+  const [selectedWorker, setSelectedWorker] = useState<string>("");
+  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [comparativeStats, setComparativeStats] = useState<any>(null);
+  const [workerAnalytics, setWorkerAnalytics] = useState<any>(null);
+  const [loading360, setLoading360] = useState(false);
+
   const t = T[lang];
 
   useEffect(() => {
     const l = localStorage.getItem("cs_lang") as "pt" | "it";
     if (l === "pt" || l === "it") setLang(l);
+    fetchCurrentUser();
     fetchUsers();
     fetchEmailSettings();
   }, []);
 
+  useEffect(() => {
+    if (tab === "analytics360") {
+      fetch360Data();
+    }
+  }, [tab, selectedYear]);
+
+  useEffect(() => {
+    if (tab === "analytics360" && selectedWorker) {
+      fetchWorkerAnalytics(selectedWorker);
+    }
+  }, [tab, selectedWorker, selectedYear]);
+
   const getToken = () => localStorage.getItem("cs_token") || "";
+
+  async function fetchCurrentUser() {
+    try {
+      const res = await fetch("/api/user/me", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        setCurrentUser(await res.json());
+      }
+    } catch { /* ignored */ }
+  }
+
+  async function fetch360Data() {
+    setLoading360(true);
+    try {
+      // 1. Obter trabalhadores
+      const resWorkers = await fetch("/api/admin/workers", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (resWorkers.ok) {
+        const d = await resWorkers.json();
+        setWorkersList(d.workers || []);
+        if (d.workers && d.workers.length > 0 && !selectedWorker) {
+          setSelectedWorker(d.workers[0]);
+        }
+      }
+      // 2. Obter estatísticas comparativas
+      const resComp = await fetch(`/api/admin/all-workers-stats?year=${selectedYear}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (resComp.ok) {
+        setComparativeStats(await resComp.json());
+      }
+    } catch { /* ignored */ }
+    finally { setLoading360(false); }
+  }
+
+  async function fetchWorkerAnalytics(worker: string) {
+    try {
+      const res = await fetch(`/api/admin/worker-analytics?worker_name=${encodeURIComponent(worker)}&year=${selectedYear}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        setWorkerAnalytics(await res.json());
+      }
+    } catch { /* ignored */ }
+  }
+
+  async function updatePermissions(id: string, perms: string) {
+    try {
+      const res = await fetch(`/api/admin/users/${id}/permissions`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ admin_permissions: perms }),
+      });
+      if (res.ok) {
+        showToast(lang === "pt" ? "Permissões atualizadas!" : "Permessi aggiornati!");
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        showToast(d.detail || t.error);
+      }
+    } catch { showToast(t.error); }
+  }
 
   async function fetchUsers() {
     setLoading(true);
@@ -221,7 +353,7 @@ export default function AdminPage() {
       });
       if (res.ok) {
         showToast(t.success_create);
-        setForm({ name: "", email: "", password: "", lang: "it", role: "worker" });
+        setForm({ name: "", email: "", password: "", lang: "it", role: "worker", admin_permissions: "full_control" });
         setTab("all");
         fetchUsers();
       } else {
@@ -315,7 +447,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className={styles.tabs}>
-          {(["pending", "all", "create", "email"] as const).map(tb => (
+          {(["pending", "all", "create", "email", "analytics360"] as const).map(tb => (
             <button
               key={tb}
               className={`${styles.tab} ${tab === tb ? styles.tabActive : ""}`}
@@ -351,6 +483,32 @@ export default function AdminPage() {
                         {u.lang === "it" ? "🇮🇹" : "🇧🇷"} {t.created}: {formatDate(u.created_at)}
                       </span>
                     </div>
+                    {u.role === "admin" && (
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                        <span style={{
+                          background: u.is_creator === 1 ? "rgba(167, 139, 250, 0.15)" : "rgba(255, 255, 255, 0.08)",
+                          color: u.is_creator === 1 ? "#c084fc" : "#9ca3af",
+                          border: u.is_creator === 1 ? "1px solid rgba(167, 139, 250, 0.3)" : "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700
+                        }}>
+                          {u.is_creator === 1 ? t.creatorBadge : u.admin_permissions === "read_only" ? t.readOnly.toUpperCase() : t.fullControl.toUpperCase()}
+                        </span>
+                        
+                        {currentUser?.is_creator === 1 && u.is_creator !== 1 && (
+                          <select
+                            style={{
+                              background: "#1a1a2e", color: "#fff", border: "1px solid rgba(255,255,255,0.15)",
+                              borderRadius: 6, padding: "2px 6px", fontSize: 10, cursor: "pointer", outline: "none"
+                            }}
+                            value={u.admin_permissions || "full_control"}
+                            onChange={(e) => updatePermissions(u.id, e.target.value)}
+                          >
+                            <option value="full_control">{t.fullControl}</option>
+                            <option value="read_only">{t.readOnly}</option>
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={styles.cardActions}>
@@ -364,7 +522,7 @@ export default function AdminPage() {
                       🚫 {t.block}
                     </button>
                   )}
-                  {u.role !== "admin" && (
+                  {(u.role !== "admin" || (currentUser?.is_creator === 1 && u.is_creator !== 1)) && (
                     <button className={styles.btnRemove} onClick={() => remove(u.id)}>
                       🗑️
                     </button>
@@ -424,6 +582,15 @@ export default function AdminPage() {
                 <option value="admin">{t.roles.admin}</option>
               </select>
             </div>
+            {form.role === "admin" && (
+              <div className={styles.formRow}>
+                <label>{t.adminPowerLabel}</label>
+                <select className={styles.input} value={form.admin_permissions} onChange={e => setForm({ ...form, admin_permissions: e.target.value })}>
+                  <option value="full_control">{t.fullControl}</option>
+                  <option value="read_only">{t.readOnly}</option>
+                </select>
+              </div>
+            )}
             <button className={styles.btnCreate} type="submit" disabled={submitting}>
               {submitting ? "⏳..." : `✅ ${t.create}`}
             </button>
@@ -565,6 +732,244 @@ export default function AdminPage() {
               </button>
             </div>
           </form>
+        )}
+
+        {/* Painel 360 */}
+        {tab === "analytics360" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24, paddingBottom: 40 }}>
+            {/* Controles do Painel */}
+            <div style={{
+              display: "flex", gap: 16, background: "rgba(255,255,255,0.03)", 
+              border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: 16,
+              alignItems: "center", flexWrap: "wrap"
+            }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.4)" }}>Ano / Anno</label>
+                <select
+                  style={{
+                    background: "#1a1a2e", color: "#fff", border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 8, padding: "8px 16px", fontSize: "0.85rem", cursor: "pointer", outline: "none"
+                  }}
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                >
+                  <option value={2026}>2026</option>
+                  <option value={2027}>2027</option>
+                  <option value={2025}>2025</option>
+                  <option value={2024}>2024</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 200 }}>
+                <label style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.4)" }}>{t.selectWorker}</label>
+                <select
+                  style={{
+                    background: "#1a1a2e", color: "#fff", border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 8, padding: "8px 16px", fontSize: "0.85rem", cursor: "pointer", outline: "none", width: "100%"
+                  }}
+                  value={selectedWorker}
+                  onChange={(e) => setSelectedWorker(e.target.value)}
+                >
+                  {workersList.map((w) => (
+                    <option key={w} value={w}>{w}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {loading360 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "rgba(255,255,255,0.4)" }}>⏳...</div>
+            ) : (
+              <>
+                {/* ─── Visão Comparativa de Trabalho ─── */}
+                <div style={{
+                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 16, padding: 20
+                }}>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: 700, margin: "0 0 16px", color: "#fff" }}>
+                    📊 {t.summaryTitle} ({selectedYear})
+                  </h2>
+
+                  {comparativeStats ? (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 20 }}>
+                        {comparativeStats.most_worked && (
+                          <div style={{
+                            background: "rgba(52, 211, 153, 0.04)", border: "1px solid rgba(52, 211, 153, 0.15)",
+                            borderRadius: 12, padding: 14
+                          }}>
+                            <div style={{ fontSize: "0.75rem", color: "#34d399", fontWeight: 700 }}>🏆 {t.mostWorked}</div>
+                            <div style={{ fontSize: "1.15rem", fontWeight: 700, margin: "4px 0", color: "#fff" }}>
+                              {comparativeStats.most_worked.name}
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.6)" }}>
+                              {comparativeStats.most_worked.shifts} {lang === "pt" ? "turnos" : "turni"} ({Number(comparativeStats.most_worked.hours || 0).toFixed(1)}h)
+                            </div>
+                          </div>
+                        )}
+
+                        {comparativeStats.least_worked && (
+                          <div style={{
+                            background: "rgba(248, 113, 113, 0.04)", border: "1px solid rgba(248, 113, 113, 0.15)",
+                            borderRadius: 12, padding: 14
+                          }}>
+                            <div style={{ fontSize: "0.75rem", color: "#f87171", fontWeight: 700 }}>⚠️ {t.leastWorked}</div>
+                            <div style={{ fontSize: "1.15rem", fontWeight: 700, margin: "4px 0", color: "#fff" }}>
+                              {comparativeStats.least_worked.name}
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.6)" }}>
+                              {comparativeStats.least_worked.shifts} {lang === "pt" ? "turnos" : "turni"} ({Number(comparativeStats.least_worked.hours || 0).toFixed(1)}h)
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{
+                          background: "rgba(255, 255, 255, 0.02)", border: "1px solid rgba(255, 255, 255, 0.08)",
+                          borderRadius: 12, padding: 14
+                        }}>
+                          <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.45)", fontWeight: 700 }}>📁 {lang === "pt" ? "Total Geral" : "Totale Generale"}</div>
+                          <div style={{ fontSize: "1.15rem", fontWeight: 700, margin: "4px 0", color: "#fff" }}>
+                            {comparativeStats.total_shifts_all} {lang === "pt" ? "turnos" : "turni"}
+                          </div>
+                          <div style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.6)" }}>
+                            {Number(comparativeStats.total_hours_all || 0).toFixed(1)}h {lang === "pt" ? "acumuladas" : "accumulate"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Lista Simples de Comparação */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {comparativeStats.workers.map((w: any) => (
+                          <div
+                            key={w.worker_name}
+                            style={{
+                              display: "flex", justifyContent: "space-between", alignItems: "center",
+                              background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "10px 14px",
+                              border: selectedWorker === w.worker_name ? "1px solid rgba(167, 139, 250, 0.3)" : "1px solid transparent",
+                              cursor: "pointer"
+                            }}
+                            onClick={() => setSelectedWorker(w.worker_name)}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{
+                                width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #6366f1, #a78bfa)",
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff"
+                              }}>
+                                {w.worker_name[0]?.toUpperCase()}
+                              </div>
+                              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#fff" }}>{w.worker_name}</span>
+                            </div>
+                            <div style={{ display: "flex", gap: 16, fontSize: "0.8rem" }}>
+                              <span style={{ color: "rgba(255,255,255,0.7)" }}><strong>{w.total_shifts}</strong> {lang === "pt" ? "turnos" : "turni"}</span>
+                              <span style={{ color: "#a78bfa", fontWeight: 600 }}>{Number(w.total_hours || 0).toFixed(1)}h</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.85rem" }}>—</div>
+                  )}
+                </div>
+
+                {/* ─── Relatório Detalhado 360 do Funcionário ─── */}
+                {selectedWorker && workerAnalytics && (
+                  <div style={{
+                    background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                    borderRadius: 16, padding: 20
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                      <h2 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0, color: "#fff" }}>
+                        👤 {t.workerDetailTitle}: <span style={{ color: "#a78bfa" }}>{workerAnalytics.worker_name}</span>
+                      </h2>
+                      <span style={{
+                        background: "rgba(167, 139, 250, 0.1)", color: "#a78bfa",
+                        borderRadius: 8, padding: "4px 12px", fontSize: "0.78rem", fontWeight: 700
+                      }}>
+                        {workerAnalytics.year}
+                      </span>
+                    </div>
+
+                    {/* Grade de Estatísticas 360 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
+                      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)" }}>{t.daysWorked}</div>
+                        <div style={{ fontSize: "1.4rem", fontWeight: 800, color: "#fff", margin: "4px 0" }}>{workerAnalytics.total_shifts}</div>
+                        <div style={{ fontSize: "0.7rem", color: "#a78bfa" }}>{Number(workerAnalytics.total_hours || 0).toFixed(1)}h {lang === "pt" ? "trabalhadas" : "lavorate"}</div>
+                      </div>
+
+                      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)" }}>{t.daysOff}</div>
+                        <div style={{ fontSize: "1.4rem", fontWeight: 800, color: "#fff", margin: "4px 0" }}>{workerAnalytics.total_days_off}</div>
+                        <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)" }}>{lang === "pt" ? "folgas anuais" : "giorni liberi"}</div>
+                      </div>
+
+                      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)" }}>{t.mostWorkedDay}</div>
+                        <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "#fff", margin: "8px 0" }}>
+                          {lang === "pt" ? workerAnalytics.most_worked_day.pt : workerAnalytics.most_worked_day.it}
+                        </div>
+                        <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)" }}>{workerAnalytics.most_worked_day.count} {lang === "pt" ? "vezes escalado" : "volte"}</div>
+                      </div>
+
+                      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)" }}>{t.saturdays}</div>
+                        <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#fff", margin: "4px 0" }}>
+                          {workerAnalytics.weekends.saturday_worked} / {workerAnalytics.weekends.saturday_worked + workerAnalytics.weekends.saturday_off}
+                        </div>
+                        <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)" }}>{lang === "pt" ? "sábados escalados" : "sabati lavorati"}</div>
+                      </div>
+
+                      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: 14 }}>
+                        <div style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.4)" }}>{t.sundays}</div>
+                        <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#fff", margin: "4px 0" }}>
+                          {workerAnalytics.weekends.sunday_worked} / {workerAnalytics.weekends.sunday_worked + workerAnalytics.weekends.sunday_off}
+                        </div>
+                        <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)" }}>{lang === "pt" ? "domingos escalados" : "domeniche lavorate"}</div>
+                      </div>
+                    </div>
+
+                    {/* Folgas Prolongadas / Férias */}
+                    <div>
+                      <h3 style={{ fontSize: "0.95rem", fontWeight: 700, margin: "0 0 12px", color: "#fff" }}>
+                        ✈️ {t.vacationsTitle}
+                      </h3>
+                      {workerAnalytics.vacations && workerAnalytics.vacations.length > 0 ? (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                          {workerAnalytics.vacations.map((vac: any, idx: number) => (
+                            <div
+                              key={idx}
+                              style={{
+                                background: "rgba(167, 139, 250, 0.03)", border: "1px solid rgba(167, 139, 250, 0.1)",
+                                borderRadius: 10, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center"
+                              }}
+                            >
+                              <div style={{ fontSize: "0.8rem" }}>
+                                <span style={{ color: "rgba(255,255,255,0.4)", marginRight: 4 }}>{t.vacationFrom}</span>
+                                <strong style={{ color: "#fff" }}>{new Date(vac.start).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</strong>
+                                <span style={{ color: "rgba(255,255,255,0.4)", margin: "0 4px" }}>{t.vacationTo}</span>
+                                <strong style={{ color: "#fff" }}>{new Date(vac.end).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</strong>
+                              </div>
+                              <span style={{
+                                background: "rgba(167, 139, 250, 0.15)", color: "#c084fc",
+                                borderRadius: 6, padding: "2px 8px", fontSize: "0.72rem", fontWeight: 700
+                              }}>
+                                {vac.days} {t.vacationDays}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.45)", margin: 0 }}>
+                          🏝️ {t.noVacations}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
       </div>
     </main>
