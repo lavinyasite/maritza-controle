@@ -1,0 +1,25 @@
+# Banco de dados
+*.db
+*.sqlite3
+
+# Variáveis de ambiente (NUNCA commitar!)
+.env
+.env.local
+.env.production
+.env.staging
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+env/
+.venv/
+
+# Uploads de PDFs
+uploads/
+pdfs/
+
+# Logs
+*.log
+logs/

@@ -1,0 +1,121 @@
+{
+  "common": {
+    "loading": "Caricamento...",
+    "save": "Salva",
+    "cancel": "Annulla",
+    "confirm": "Conferma",
+    "delete": "Elimina",
+    "edit": "Modifica",
+    "back": "Indietro",
+    "close": "Chiudi",
+    "yes": "Sì",
+    "no": "No",
+    "search": "Cerca",
+    "filter": "Filtra",
+    "export": "Esporta",
+    "refresh": "Aggiorna"
+  },
+  "auth": {
+    "login": "Accedi",
+    "logout": "Esci",
+    "email": "E-mail",
+    "password": "Password",
+    "forgotPassword": "Password dimenticata?",
+    "welcome": "Benvenuto su Controllo Servizi",
+    "loginTitle": "Accedi al tuo account",
+    "noAccount": "Non hai un account?",
+    "register": "Registrati",
+    "chooseLanguage": "Scegli la tua lingua"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "mySchedule": "Il mio turno",
+    "thisWeek": "Questa settimana",
+    "thisMonth": "Questo mese",
+    "hoursWorked": "Ore lavorate",
+    "shiftsTotal": "Totale turni",
+    "daysOff": "Giorni liberi",
+    "nextShift": "Prossimo turno",
+    "noShifts": "Nessun turno programmato",
+    "overtimeHours": "Ore straordinario",
+    "comparison": "Confronto"
+  },
+  "schedule": {
+    "title": "Scala di servizio",
+    "upload": "Carica PDF",
+    "noSchedule": "Nessuna scala disponibile",
+    "month": "Mese",
+    "week": "Settimana",
+    "day": "Giorno",
+    "list": "Lista",
+    "shift": {
+      "morning": "Mattino",
+      "afternoon": "Pomeriggio",
+      "night": "Notte",
+      "dayOff": "Riposo"
+    },
+    "time": {
+      "start": "Inizio",
+      "end": "Fine",
+      "duration": "Durata",
+      "hours": "ore"
+    }
+  },
+  "notifications": {
+    "title": "Notifiche",
+    "newSchedule": "Nuova scala disponibile!",
+    "shiftReminder": "Promemoria: il tuo turno inizia tra {hours}h",
+    "scheduleChange": "Attenzione: rilevata modifica alla scala",
+    "emailConnected": "Email collegata con successo",
+    "pdfProcessed": "PDF elaborato: {count} turni importati",
+    "markAllRead": "Segna tutte come lette",
+    "noNotifications": "Nessuna notifica"
+  },
+  "analytics": {
+    "title": "Analisi",
+    "hoursPerWeek": "Ore a settimana",
+    "hoursPerMonth": "Ore al mese",
+    "shiftDistribution": "Distribuzione turni",
+    "monthComparison": "Confronto mesi",
+    "workedVsTarget": "Lavorato vs Obiettivo",
+    "bankHours": "Banca ore",
+    "balance": "Saldo",
+    "positive": "Positivo",
+    "negative": "Negativo"
+  },
+  "settings": {
+    "title": "Impostazioni",
+    "profile": "Profilo",
+    "emailSetup": "Configurazione e-mail",
+    "emailAddress": "Indirizzo e-mail",
+    "appPassword": "Password app",
+    "provider": "Provider",
+    "autoDetected": "Rilevato automaticamente",
+    "checkInterval": "Controlla ogni",
+    "minutes": "minuti",
+    "language": "Lingua",
+    "theme": "Tema",
+    "dark": "Scuro",
+    "light": "Chiaro",
+    "notifications": "Notifiche",
+    "pushNotifications": "Notifiche push",
+    "emailNotifications": "Notifiche e-mail",
+    "reminderTime": "Promemoria prima del turno",
+    "save": "Salva impostazioni",
+    "testConnection": "Testa connessione",
+    "connectionOk": "Connessione stabilita con successo!",
+    "connectionFail": "Connessione fallita. Controlla i dati.",
+    "appPasswordHelp": "Come ottenere la password dell'app"
+  },
+  "workers": {
+    "title": "Collaboratori",
+    "allWorkers": "Tutti i collaboratori",
+    "myView": "La mia visione"
+  },
+  "errors": {
+    "generic": "Si è verificato un errore. Riprova.",
+    "network": "Nessuna connessione a internet.",
+    "unauthorized": "Sessione scaduta. Accedi di nuovo.",
+    "notFound": "Pagina non trovata."
+  }
+}

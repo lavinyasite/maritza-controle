@@ -1,0 +1,42 @@
+vps.nova
+
+KVM 2
+
+31.97.122.63
+
+senha root
+Milhonario10.
+
+acesso easypanel
+email: 1nlocker.ia@gmail.com
+senha: Milhonario10.
+
+
+api hostinger 
+nome: vpsnova
+api: NuPwVzFkqTOi2LR7zK2A107CuAKUMmCG8Dl3iLiS75d2cfd8
+
+easypanel http://31.97.122.63:3000/settings/server/users
+9e4db9504d0b4fe21f35e34b679b4d20ee000c7e15efd7991341304692c0fe83
+1nlocker.ia@gmail.com
+
+Domínio Padrão
+0bzmly.easypanel.host
+
+https://github.com/lavinyasite/maritza-controle
+
+
+apontar pra esse endereço
+https://controllo-servizi.saashpm.com.br/
+
+A	
+controllo-servizi.saashpm.com.br	
+0	
+31.97.122.63	
+300	
+
+pasta no eadypanel
+http://31.97.122.63:3000/projects/controllo-servizi/app/controllo/init/source
+
+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
+

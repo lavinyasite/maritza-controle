@@ -1,0 +1,43 @@
+# Ambiente
+.env
+.env.local
+.env.production
+.env.staging
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+env/
+.venv/
+*.db
+*.sqlite3
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# Capacitor
+android/
+ios/
+frontend/android/
+frontend/ios/
+
+# Logs e temporários
+*.log
+logs/
+uploads/
+pdfs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

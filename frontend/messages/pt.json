@@ -1,0 +1,121 @@
+{
+  "common": {
+    "loading": "Carregando...",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "back": "Voltar",
+    "close": "Fechar",
+    "yes": "Sim",
+    "no": "Não",
+    "search": "Pesquisar",
+    "filter": "Filtrar",
+    "export": "Exportar",
+    "refresh": "Atualizar"
+  },
+  "auth": {
+    "login": "Entrar",
+    "logout": "Sair",
+    "email": "E-mail",
+    "password": "Senha",
+    "forgotPassword": "Esqueceu a senha?",
+    "welcome": "Bem-vindo ao Controllo Servizi",
+    "loginTitle": "Acesse sua conta",
+    "noAccount": "Não tem conta?",
+    "register": "Cadastrar-se",
+    "chooseLanguage": "Escolha seu idioma"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "mySchedule": "Minha Escala",
+    "thisWeek": "Esta Semana",
+    "thisMonth": "Este Mês",
+    "hoursWorked": "Horas Trabalhadas",
+    "shiftsTotal": "Total de Turnos",
+    "daysOff": "Dias de Folga",
+    "nextShift": "Próximo Turno",
+    "noShifts": "Nenhum turno agendado",
+    "overtimeHours": "Horas Extras",
+    "comparison": "Comparativo"
+  },
+  "schedule": {
+    "title": "Escala de Serviço",
+    "upload": "Enviar PDF",
+    "noSchedule": "Nenhuma escala disponível",
+    "month": "Mês",
+    "week": "Semana",
+    "day": "Dia",
+    "list": "Lista",
+    "shift": {
+      "morning": "Manhã",
+      "afternoon": "Tarde",
+      "night": "Noturno",
+      "dayOff": "Folga"
+    },
+    "time": {
+      "start": "Entrada",
+      "end": "Saída",
+      "duration": "Duração",
+      "hours": "horas"
+    }
+  },
+  "notifications": {
+    "title": "Notificações",
+    "newSchedule": "Nova escala disponível!",
+    "shiftReminder": "Lembrete: seu turno começa em {hours}h",
+    "scheduleChange": "Atenção: mudança detectada na escala",
+    "emailConnected": "E-mail conectado com sucesso",
+    "pdfProcessed": "PDF processado: {count} turnos importados",
+    "markAllRead": "Marcar todas como lidas",
+    "noNotifications": "Nenhuma notificação"
+  },
+  "analytics": {
+    "title": "Análises",
+    "hoursPerWeek": "Horas por Semana",
+    "hoursPerMonth": "Horas por Mês",
+    "shiftDistribution": "Distribuição de Turnos",
+    "monthComparison": "Comparativo de Meses",
+    "workedVsTarget": "Trabalhado vs Meta",
+    "bankHours": "Banco de Horas",
+    "balance": "Saldo",
+    "positive": "Positivo",
+    "negative": "Negativo"
+  },
+  "settings": {
+    "title": "Configurações",
+    "profile": "Perfil",
+    "emailSetup": "Configuração de E-mail",
+    "emailAddress": "Endereço de E-mail",
+    "appPassword": "Senha do Aplicativo",
+    "provider": "Provedor",
+    "autoDetected": "Detectado automaticamente",
+    "checkInterval": "Verificar a cada",
+    "minutes": "minutos",
+    "language": "Idioma",
+    "theme": "Tema",
+    "dark": "Escuro",
+    "light": "Claro",
+    "notifications": "Notificações",
+    "pushNotifications": "Notificações Push",
+    "emailNotifications": "Notificações por E-mail",
+    "reminderTime": "Lembrete antes do turno",
+    "save": "Salvar configurações",
+    "testConnection": "Testar conexão",
+    "connectionOk": "Conexão estabelecida com sucesso!",
+    "connectionFail": "Falha na conexão. Verifique os dados.",
+    "appPasswordHelp": "Como obter a senha do aplicativo"
+  },
+  "workers": {
+    "title": "Colaboradores",
+    "allWorkers": "Todos os colaboradores",
+    "myView": "Minha visão"
+  },
+  "errors": {
+    "generic": "Ocorreu um erro. Tente novamente.",
+    "network": "Sem conexão com a internet.",
+    "unauthorized": "Sessão expirada. Faça login novamente.",
+    "notFound": "Página não encontrada."
+  }
+}

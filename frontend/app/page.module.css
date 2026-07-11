@@ -1,0 +1,225 @@
+.container {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  position: relative;
+  overflow: hidden;
+}
+
+.bgOrb1 {
+  position: fixed;
+  top: -20%;
+  left: -20%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(233,69,96,0.12) 0%, transparent 70%);
+  pointer-events: none;
+  animation: float1 8s ease-in-out infinite;
+}
+
+.bgOrb2 {
+  position: fixed;
+  bottom: -20%;
+  right: -20%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(108,140,248,0.1) 0%, transparent 70%);
+  pointer-events: none;
+  animation: float2 10s ease-in-out infinite;
+}
+
+@keyframes float1 {
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(30px, -20px); }
+}
+@keyframes float2 {
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(-20px, 30px); }
+}
+
+.content {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  animation: fadeIn var(--transition-slow) both;
+  position: relative;
+  z-index: 1;
+}
+
+/* Logo */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.logoIcon {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 16px rgba(233,69,96,0.5));
+}
+
+.logoTitle {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--color-text);
+  line-height: 1.1;
+}
+
+.logoSub {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* Headline */
+.headline {
+  text-align: center;
+}
+.headline h2 {
+  font-size: 1.6rem;
+  margin-bottom: var(--space-2);
+}
+.headline p {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+/* Cards de idioma */
+.langGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.langCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-align: center;
+  overflow: hidden;
+}
+
+.langCard::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top, rgba(233,69,96,0.06) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+}
+
+.langCard:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(233,69,96,0.2);
+}
+
+.langCard:hover::before { opacity: 1; }
+
+.langCard:active { transform: translateY(-2px); }
+
+.langCardActive {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-accent);
+  background: var(--color-surface-2);
+}
+.langCardActive::before { opacity: 1; }
+
+.langFlag {
+  font-size: 2.8rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
+}
+
+.langName {
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.langSubtitle {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.langDesc {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+  line-height: 1.4;
+}
+
+.langCheck {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 24px;
+  height: 24px;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  animation: popIn 0.2s ease;
+}
+.langCheck svg { width: 12px; height: 12px; }
+
+@keyframes popIn {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
+}
+
+/* Loading bar */
+.loadingBar {
+  width: 100%;
+  height: 3px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.loadingProgress {
+  height: 100%;
+  width: 40%;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  animation: loadingSlide 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes loadingSlide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+
+.footer {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Mobile */
+@media (max-width: 400px) {
+  .langGrid { grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+  .langCard { padding: var(--space-6) var(--space-3); }
+  .langFlag { font-size: 2.2rem; }
+}
