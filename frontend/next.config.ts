@@ -1,17 +1,18 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Removido output: 'export' para suportar App Router, useSearchParams e API routes
-  // Para mobile (Capacitor), faremos o build separado quando necessário
+  output: "standalone",  // Necessário para o Dockerfile de produção
   images: {
     unoptimized: true,
   },
-  // Redirecionar /api/* para o backend FastAPI em dev
+  // Proxy /api/* para o backend FastAPI
   async rewrites() {
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:8000/api/:path*",
+        destination: process.env.BACKEND_URL
+          ? `${process.env.BACKEND_URL}/api/:path*`
+          : "http://localhost:8000/api/:path*",
       },
     ];
   },
