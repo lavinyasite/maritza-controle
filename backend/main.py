@@ -447,7 +447,7 @@ async def get_my_shifts(
     month: Optional[str] = None # formato: YYYY-MM
 ):
     """Retorna a lista de turnos do usuário logado com filtros."""
-    name_query = f"%{current_user['name'].strip()}%"
+    name_query = f"%{current_user['name'].split()[0].strip()}%"
     query = "SELECT * FROM shifts WHERE worker_name LIKE ? "
     params = [name_query]
     
@@ -476,7 +476,7 @@ async def get_my_analytics(
     if not year:
         year = datetime.now().year
         
-    name_query = f"%{current_user['name'].strip()}%"
+    name_query = f"%{current_user['name'].split()[0].strip()}%"
     year_prefix = f"{year}%"
     
     # 1. Total de turnos e horas
@@ -582,7 +582,7 @@ async def get_my_analytics(
 @app.get("/api/shifts/week")
 async def get_week_shifts(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
     """Retorna os turnos da semana atual."""
-    name_query = f"%{current_user['name'].strip()}%"
+    name_query = f"%{current_user['name'].split()[0].strip()}%"
     today = datetime.now().date()
     start_of_week = today - timedelta(days=today.weekday() + 1) # Domingo ou Segunda
     
@@ -618,7 +618,7 @@ async def get_week_shifts(current_user: dict = Depends(get_current_user), db=Dep
 @app.get("/api/shifts/stats")
 async def get_stats(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
     """Estatísticas do mês atual."""
-    name_query = f"%{current_user['name'].strip()}%"
+    name_query = f"%{current_user['name'].split()[0].strip()}%"
     now = datetime.now()
     month_prefix = now.strftime("%Y-%m-%d")[:7] # YYYY-MM
     
