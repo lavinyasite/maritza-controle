@@ -47,9 +47,43 @@ class EmailReader:
                 pass
             self.connection = None
 
+    def _process_message(self, email_id, results):
+        try:
+            status, msg_data = self.connection.fetch(email_id, "(RFC822)")
+            if status != "OK":
+                return
+
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+
+            sender = msg.get("From", "")
+            subject = self._decode_header(msg.get("Subject", ""))
+            date_str = msg.get("Date", "")
+
+            # Procura anexos PDF
+            for part in msg.walk():
+                ct = part.get_content_type()
+                fn = self._decode_header(part.get_filename() or "")
+                is_pdf = (ct == "application/pdf") or (ct == "application/octet-stream" and fn.lower().endswith(".pdf"))
+                if is_pdf:
+                    filename = fn or "anexo.pdf"
+                    content = part.get_payload(decode=True)
+                    if content:
+                        results.append({
+                            "filename": filename,
+                            "content": content,
+                            "sender": sender,
+                            "subject": subject,
+                            "date": date_str,
+                            "email_id": email_id,
+                        })
+                        logger.info(f"PDF encontrado: {filename} de {sender}")
+        except Exception as e:
+            logger.error(f"Erro ao processar e-mail {email_id}: {e}")
+
     def fetch_pdf_attachments(self, since_days: int = 7) -> list[dict]:
         """
-        Busca e-mails não lidos com anexos PDF nos últimos N dias.
+        Busca e-mails não lidos/recentes com anexos PDF nos últimos N dias no INBOX e na pasta Sent.
         Retorna lista de: {filename, content, sender, date, subject}
         """
         if not self.connection:
@@ -58,49 +92,31 @@ class EmailReader:
 
         results = []
         try:
-            self.connection.select("INBOX")
             since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
 
-            # Busca e-mails não lidos desde a data
+            # 1. INBOX (unseen)
+            self.connection.select("INBOX")
             status, messages = self.connection.search(
                 None,
                 f'(UNSEEN SINCE "{since_date}")'
             )
-            if status != "OK":
-                return []
+            if status == "OK":
+                email_ids = messages[0].split()
+                logger.info(f"Encontrados {len(email_ids)} e-mails não lidos no INBOX")
+                for email_id in email_ids:
+                    self._process_message(email_id, results)
 
-            email_ids = messages[0].split()
-            logger.info(f"Encontrados {len(email_ids)} e-mails não lidos")
-
-            for email_id in email_ids:
-                status, msg_data = self.connection.fetch(email_id, "(RFC822)")
-                if status != "OK":
-                    continue
-
-                raw_email = msg_data[0][1]
-                msg = email.message_from_bytes(raw_email)
-
-                sender = msg.get("From", "")
-                subject = self._decode_header(msg.get("Subject", ""))
-                date_str = msg.get("Date", "")
-
-                # Procura anexos PDF
-                for part in msg.walk():
-                    if part.get_content_type() == "application/pdf":
-                        filename = self._decode_header(
-                            part.get_filename() or "anexo.pdf"
-                        )
-                        content = part.get_payload(decode=True)
-                        if content:
-                            results.append({
-                                "filename": filename,
-                                "content": content,
-                                "sender": sender,
-                                "subject": subject,
-                                "date": date_str,
-                                "email_id": email_id,
-                            })
-                            logger.info(f"PDF encontrado: {filename} de {sender}")
+            # 2. Sent (recentes enviados para alexander)
+            self.connection.select("Sent")
+            status, messages = self.connection.search(
+                None,
+                f'(SINCE "{since_date}" HEADER To "alexander_visentin@yahoo.com")'
+            )
+            if status == "OK":
+                email_ids = messages[0].split()
+                logger.info(f"Encontrados {len(email_ids)} e-mails para Alexander na pasta Sent")
+                for email_id in email_ids:
+                    self._process_message(email_id, results)
 
             return results
 

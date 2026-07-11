@@ -37,10 +37,19 @@ class PDFParser:
             return self._extract_all_shifts(pdf)
 
     def _extract_all_shifts(self, pdf) -> list[dict]:
+        self.current_year = datetime.now().year
         all_shifts = []
         for page in pdf.pages:
             tables = page.extract_tables()
             for table in tables:
+                # Tentar extrair o ano do cabeçalho da tabela se houver, ex: "mag-24"
+                for r in table:
+                    if r and r[0]:
+                        match = re.search(r"\b([a-zA-Z]{3})-(\d{2})\b", str(r[0]))
+                        if match:
+                            y = int(match.group(2))
+                            self.current_year = 2000 + y
+                            break
                 shifts = self._parse_table(table)
                 all_shifts.extend(shifts)
         logger.info(f"Total de turnos extraídos: {len(all_shifts)}")
@@ -58,8 +67,8 @@ class PDFParser:
 
             first_cell = str(row[0]).strip().lower()
 
-            # Linha de cabeçalho de semana: "settimana N"
-            if "settimana" in first_cell:
+            # Linha de cabeçalho de semana: "settimana N" ou contendo "operatore"
+            if "settimana" in first_cell or "operatore" in first_cell:
                 current_dates = self._extract_dates_from_row(row)
                 notes_row = []
                 continue
@@ -131,7 +140,7 @@ class PDFParser:
         return shifts
 
     def _parse_date(self, value: str) -> Optional[date]:
-        """Parseia datas nos formatos: DD/MM/YYYY, D/M/YYYY."""
+        """Parseia datas nos formatos: DD/MM/YYYY, D/M/YYYY, e DD/MM."""
         value = value.strip()
         patterns = [
             r"(\d{1,2})/(\d{1,2})/(\d{4})",
@@ -144,6 +153,15 @@ class PDFParser:
                     return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
                 except ValueError:
                     pass
+
+        # Formato curto: lun 29/4 ou 29/4
+        short_pattern = r"(\d{1,2})/(\d{1,2})"
+        m = re.search(short_pattern, value)
+        if m:
+            try:
+                return date(self.current_year, int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                pass
         return None
 
     def _clean_time(self, value) -> Optional[str]:

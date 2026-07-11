@@ -847,46 +847,62 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
 
         imap = _imap_lib.IMAP4_SSL(imap_host, imap_port)
         imap.login(email_addr, app_pass)
-        imap.select("INBOX")
 
-        # Buscar TODOS os e-mails da Francesca, sem filtro UNSEEN
-        status, messages = imap.search(None, f'FROM "{SENDER}"')
-        if status != "OK":
-            imap.logout()
-            conn_sync.close()
-            return {"error": "Falha ao buscar e-mails"}
-
-        email_ids = messages[0].split()
-        total_emails = len(email_ids)
+        total_emails = 0
         total_pdfs = 0
         total_novos = 0
 
-        for eid in email_ids:
-            try:
-                st, msg_data = imap.fetch(eid, "(RFC822)")
-                if st != "OK":
-                    continue
-                msg = _email_lib.message_from_bytes(msg_data[0][1])
+        # Helper para processar emails e extrair turnos
+        def _process_emails(email_ids):
+            nonlocal total_pdfs, total_novos
+            for eid in email_ids:
+                try:
+                    st, msg_data = imap.fetch(eid, "(RFC822)")
+                    if st != "OK":
+                        continue
+                    msg = _email_lib.message_from_bytes(msg_data[0][1])
 
-                for part in msg.walk():
-                    ct = part.get_content_type()
-                    fn = _decode_str(part.get_filename() or "")
-                    is_pdf = (ct == "application/pdf") or \
-                             (ct == "application/octet-stream" and fn.lower().endswith(".pdf"))
-                    if not is_pdf:
-                        continue
-                    pdf_bytes = part.get_payload(decode=True)
-                    if not pdf_bytes:
-                        continue
-                    total_pdfs += 1
-                    try:
-                        shifts = parser.parse_from_bytes(pdf_bytes)
-                        novos = _save_shifts(shifts, fn or f"email_hist.pdf", conn_sync)
-                        total_novos += novos
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    for part in msg.walk():
+                        ct = part.get_content_type()
+                        fn = _decode_str(part.get_filename() or "")
+                        is_pdf = (ct == "application/pdf") or \
+                                 (ct == "application/octet-stream" and fn.lower().endswith(".pdf"))
+                        if not is_pdf:
+                            continue
+                        pdf_bytes = part.get_payload(decode=True)
+                        if not pdf_bytes:
+                            continue
+                        total_pdfs += 1
+                        try:
+                            shifts = parser.parse_from_bytes(pdf_bytes)
+                            novos = _save_shifts(shifts, fn or f"email_hist.pdf", conn_sync)
+                            total_novos += novos
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        # 1. Buscar do INBOX (Francesca)
+        try:
+            imap.select("INBOX")
+            status, messages = imap.search(None, f'FROM "{SENDER}"')
+            if status == "OK":
+                ids = messages[0].split()
+                total_emails += len(ids)
+                _process_emails(ids)
+        except Exception as e:
+            logger.error(f"[IMPORT-HIST] Erro ao buscar no INBOX: {e}")
+
+        # 2. Buscar da pasta Sent (Alexander)
+        try:
+            imap.select("Sent")
+            status, messages = imap.search(None, 'HEADER To "alexander_visentin@yahoo.com" SUBJECT "turni"')
+            if status == "OK":
+                ids = messages[0].split()
+                total_emails += len(ids)
+                _process_emails(ids)
+        except Exception as e:
+            logger.error(f"[IMPORT-HIST] Erro ao buscar na pasta Sent: {e}")
 
         imap.logout()
         conn_sync.close()
