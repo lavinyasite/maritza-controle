@@ -57,6 +57,31 @@ async def init_db():
                 approved_at TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS shifts (
+                id             TEXT PRIMARY KEY,
+                worker_name    TEXT NOT NULL,
+                date           TEXT NOT NULL,
+                start_time     TEXT,
+                end_time       TEXT,
+                shift_type     TEXT NOT NULL,
+                duration_hours REAL,
+                notes          TEXT,
+                uploaded_by    TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                UNIQUE(worker_name, date)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS uploads (
+                id          TEXT PRIMARY KEY,
+                filename    TEXT NOT NULL,
+                uploaded_by TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL,
+                status      TEXT NOT NULL,
+                shifts_count INTEGER DEFAULT 0
+            )
+        """)
         await db.commit()
 
         # Inserir admin padrão
@@ -70,6 +95,7 @@ async def init_db():
                   datetime.utcnow().isoformat()))
             await db.commit()
             logger.info(f"✅ Admin criado: {ADMIN_EMAIL}")
+
 
 
 # ─── Lifecycle ────────────────────────────────
@@ -294,34 +320,228 @@ async def admin_delete_user(user_id: str, admin=Depends(require_admin), db=Depen
 
 
 # ─── Turnos e escalas ─────────────────────────
+
+@app.get("/api/shifts/my-shifts")
+async def get_my_shifts(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+    shift_type: Optional[str] = None,
+    month: Optional[str] = None # formato: YYYY-MM
+):
+    """Retorna a lista de turnos do usuário logado com filtros."""
+    name_query = f"%{current_user['name'].strip()}%"
+    query = "SELECT * FROM shifts WHERE worker_name LIKE ? "
+    params = [name_query]
+    
+    if shift_type:
+        query += " AND shift_type = ?"
+        params.append(shift_type)
+        
+    if month:
+        query += " AND date LIKE ?"
+        params.append(f"{month}%")
+        
+    query += " ORDER BY date ASC"
+    
+    rows = await db.execute(query, params)
+    shifts = [dict(r) for r in await rows.fetchall()]
+    return {"shifts": shifts, "total": len(shifts)}
+
+
+@app.get("/api/shifts/analytics")
+async def get_my_analytics(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+    year: Optional[int] = None
+):
+    """Gera análises detalhadas acumuladas do ano de trabalho a partir do PDF."""
+    if not year:
+        year = datetime.now().year
+        
+    name_query = f"%{current_user['name'].strip()}%"
+    year_prefix = f"{year}%"
+    
+    # 1. Total de turnos e horas
+    row_stats = await db.execute("""
+        SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
+        FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, year_prefix))
+    stats = dict(await row_stats.fetchone())
+    
+    # 2. Total de folgas (registradas ou implícitas)
+    row_off = await db.execute("""
+        SELECT COUNT(*) as total_off 
+        FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
+    """, (name_query, year_prefix))
+    total_off = (await row_off.fetchone())[0]
+
+    # 3. Dia da semana mais trabalhado
+    row_days = await db.execute("""
+        SELECT date FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, year_prefix))
+    dates = [datetime.strptime(r[0], "%Y-%m-%d") for r in await row_days.fetchall() if r[0]]
+    
+    weekday_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0} # 0=Seg, 6=Dom
+    for d in dates:
+        weekday_counts[d.weekday()] += 1
+        
+    weekday_names_pt = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    weekday_names_it = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+    
+    max_day_idx = max(weekday_counts, key=weekday_counts.get) if dates else 0
+    max_day_count = weekday_counts[max_day_idx]
+    
+    # 4. Finais de semana (Sábado + Domingo)
+    weekend_worked = 0
+    weekend_off = 0
+    row_weekends = await db.execute("""
+        SELECT date, shift_type FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ?
+    """, (name_query, year_prefix))
+    for r in await row_weekends.fetchall():
+        try:
+            dt = datetime.strptime(r[0], "%Y-%m-%d")
+            if dt.weekday() in (5, 6): # 5=Sáb, 6=Dom
+                if r[1] in ('dayoff', 'R'):
+                    weekend_off += 1
+                else:
+                    weekend_worked += 1
+        except:
+            pass
+
+    # 5. Detecção de Férias/Folgas Prolongadas (sequências de 4+ dias de folga seguidos)
+    row_all_off = await db.execute("""
+        SELECT date FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
+        ORDER BY date ASC
+    """, (name_query, year_prefix))
+    off_dates = sorted([datetime.strptime(r[0], "%Y-%m-%d").date() for r in await row_all_off.fetchall() if r[0]])
+    
+    vacations = []
+    if off_dates:
+        current_streak = [off_dates[0]]
+        for i in range(1, len(off_dates)):
+            diff = (off_dates[i] - off_dates[i-1]).days
+            if diff == 1:
+                current_streak.append(off_dates[i])
+            else:
+                if len(current_streak) >= 4:
+                    vacations.append({
+                        "start": current_streak[0].isoformat(),
+                        "end": current_streak[-1].isoformat(),
+                        "days": len(current_streak)
+                    })
+                current_streak = [off_dates[i]]
+        if len(current_streak) >= 4:
+            vacations.append({
+                "start": current_streak[0].isoformat(),
+                "end": current_streak[-1].isoformat(),
+                "days": len(current_streak)
+            })
+
+    return {
+        "year": year,
+        "total_shifts": stats.get("total_shifts") or 0,
+        "total_hours": stats.get("total_hours") or 0.0,
+        "total_days_off": total_off,
+        "most_worked_day": {
+            "pt": weekday_names_pt[max_day_idx] if dates else "—",
+            "it": weekday_names_it[max_day_idx] if dates else "—",
+            "count": max_day_count
+        },
+        "weekends": {
+            "worked": weekend_worked,
+            "off": weekend_off
+        },
+        "vacations": vacations,
+        "vacations_count": len(vacations)
+    }
+
+
 @app.get("/api/shifts/week")
-async def get_week_shifts(current_user: dict = Depends(get_current_user)):
+async def get_week_shifts(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+    """Retorna os turnos da semana atual."""
+    name_query = f"%{current_user['name'].strip()}%"
+    today = datetime.now().date()
+    start_of_week = today - timedelta(days=today.weekday() + 1) # Domingo ou Segunda
+    
+    week_days = []
+    weekday_labels_pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    weekday_labels_it = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+    
+    for i in range(7):
+        current_dt = start_of_week + timedelta(days=i)
+        dt_str = current_dt.isoformat()
+        
+        row = await db.execute("""
+            SELECT shift_type, start_time, end_time FROM shifts 
+            WHERE worker_name LIKE ? AND date = ?
+        """, (name_query, dt_str))
+        shift = await row.fetchone()
+        
+        week_days.append({
+            "day_pt": weekday_labels_pt[current_dt.weekday()],
+            "day_it": weekday_labels_it[current_dt.weekday()],
+            "date": current_dt.strftime("%d/%m"),
+            "iso_date": dt_str,
+            "shift": shift["shift_type"] if shift else "R",
+            "time": f"{shift['start_time']} - {shift['end_time']}" if shift and shift['start_time'] else None
+        })
+        
     return {
         "worker": current_user["name"],
-        "week": [
-            {"day": "Dom", "date": "13/07", "shift": "R"},
-            {"day": "Seg", "date": "14/07", "shift": "M"},
-            {"day": "Ter", "date": "15/07", "shift": "M"},
-            {"day": "Qua", "date": "16/07", "shift": "P"},
-            {"day": "Qui", "date": "17/07", "shift": "N"},
-            {"day": "Sex", "date": "18/07", "shift": "R"},
-            {"day": "Sáb", "date": "19/07", "shift": "R"},
-        ]
+        "week": week_days
     }
 
 
 @app.get("/api/shifts/stats")
-async def get_stats(current_user: dict = Depends(get_current_user)):
+async def get_stats(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+    """Estatísticas do mês atual."""
+    name_query = f"%{current_user['name'].strip()}%"
+    now = datetime.now()
+    month_prefix = now.strftime("%Y-%m-%d")[:7] # YYYY-MM
+    
+    row_shifts = await db.execute("""
+        SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
+        FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, f"{month_prefix}%"))
+    stats = dict(await row_shifts.fetchone())
+    
+    row_off = await db.execute("""
+        SELECT COUNT(*) 
+        FROM shifts 
+        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
+    """, (name_query, f"{month_prefix}%"))
+    total_off = (await row_off.fetchone())[0]
+    
+    # Próximo turno
+    today_str = now.date().isoformat()
+    row_next = await db.execute("""
+        SELECT start_time, date FROM shifts 
+        WHERE worker_name LIKE ? AND date >= ? AND shift_type != 'dayoff' AND shift_type != 'R'
+        ORDER BY date ASC, start_time ASC LIMIT 1
+    """, (name_query, today_str))
+    next_shift = await row_next.fetchone()
+    next_str = next_shift["start_time"] if next_shift else "—"
+
     return {
-        "shifts_this_month": 18,
-        "total_hours": 144,
-        "next_shift": "14:00",
-        "days_off": 6,
+        "shifts_this_month": stats.get("total_shifts") or 0,
+        "total_hours": stats.get("total_hours") or 0.0,
+        "next_shift": next_str,
+        "days_off": total_off,
     }
 
 
 @app.post("/api/schedules/upload")
-async def upload_pdf(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+async def upload_pdf(
+    file: UploadFile = File(...), 
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db)
+):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Apenas PDFs são aceitos")
     content = await file.read()
@@ -330,6 +550,41 @@ async def upload_pdf(file: UploadFile = File(...), current_user: dict = Depends(
         from services.pdf_parser import PDFParser
         parser = PDFParser()
         shifts = parser.parse_from_bytes(content)
+        
+        uploaded_at = datetime.utcnow().isoformat()
+        upload_id = str(uuid.uuid4())
+        
+        inserted_count = 0
+        for s in shifts:
+            # Converter tipos do parser para os padrões aceitos
+            stype = "R" if s["shift_type"] == "dayoff" else s["shift_type"]
+            if stype == "morning": stype = "M"
+            elif stype == "afternoon": stype = "P"
+            elif stype == "night": stype = "N"
+            
+            shift_id = str(uuid.uuid4())
+            
+            # Usar INSERT OR REPLACE na tabela do banco
+            await db.execute("""
+                INSERT INTO shifts (id, worker_name, date, start_time, end_time, shift_type, duration_hours, notes, uploaded_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(worker_name, date) DO UPDATE SET
+                    start_time=excluded.start_time,
+                    end_time=excluded.end_time,
+                    shift_type=excluded.shift_type,
+                    duration_hours=excluded.duration_hours,
+                    notes=excluded.notes,
+                    uploaded_by=excluded.uploaded_by,
+                    created_at=excluded.created_at
+            """, (shift_id, s["worker_name"], s["date"], s["start_time"], s["end_time"], stype, s["duration_hours"], s["notes"], current_user["email"], uploaded_at))
+            inserted_count += 1
+            
+        await db.execute("""
+            INSERT INTO uploads (id, filename, uploaded_by, uploaded_at, status, shifts_count)
+            VALUES (?, ?, ?, ?, 'ok', ?)
+        """, (upload_id, file.filename, current_user["email"], uploaded_at, inserted_count))
+        
+        await db.commit()
         return {"filename": file.filename, "shifts_found": len(shifts), "status": "success"}
     except Exception as e:
         logger.error(f"Erro PDF: {e}")
@@ -337,10 +592,12 @@ async def upload_pdf(file: UploadFile = File(...), current_user: dict = Depends(
 
 
 @app.get("/api/schedules/history")
-async def get_history(current_user: dict = Depends(get_current_user)):
-    return {
-        "schedules": [
-            {"filename": "turni inviati A4 Agosto 26.pdf", "date": "10/07/2026", "shifts": 47, "status": "ok"},
-            {"filename": "turni inviati A4 Luglio 26.pdf",  "date": "05/06/2026", "shifts": 44, "status": "ok"},
-        ]
-    }
+async def get_history(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
+    """Histórico de escalas importadas do banco."""
+    rows = await db.execute("""
+        SELECT filename, uploaded_at as date, shifts_count as shifts, status 
+        FROM uploads ORDER BY uploaded_at DESC LIMIT 10
+    """)
+    schedules = [dict(r) for r in await rows.fetchall()]
+    return {"schedules": schedules}
+

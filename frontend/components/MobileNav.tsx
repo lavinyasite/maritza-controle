@@ -8,9 +8,10 @@ interface MobileNavProps {
 }
 
 const LABELS = {
-  pt: { home: "Início", calendar: "Calendário", alerts: "Avisos", profile: "Perfil" },
-  it: { home: "Home",   calendar: "Calendario", alerts: "Avvisi", profile: "Profilo" },
+  pt: { home: "Início", calendar: "Calendário", alerts: "Análise", profile: "Perfil" },
+  it: { home: "Home",   calendar: "Calendario", alerts: "Analisi", profile: "Profilo" },
 };
+
 
 const NAV_ITEMS = [
   {
