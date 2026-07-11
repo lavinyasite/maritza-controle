@@ -40,6 +40,11 @@ const T = {
     botStatusInactive: "Robô Desativado",
     lastCheckedLabel: "Última varredura",
     notConfigured: "Nenhum e-mail configurado ainda.",
+    importHistBtn: "📥 Importar Todo o Histórico de E-mails",
+    importHistLoading: "⏳ Varrendo todos os e-mails... pode demorar alguns minutos",
+    importHistDesc: "Lê TODOS os e-mails já enviados pela Francesca (sem limite de data). Seguro: nunca duplica dados já existentes.",
+    importHistSuccess: "✅ Importação concluída!",
+    importHistError: "❌ Erro na importação. Verifique o robô de e-mail.",
   },
   it: {
     title: "Pannello Admin",
@@ -76,6 +81,11 @@ const T = {
     botStatusInactive: "Bot Disattivato",
     lastCheckedLabel: "Ultima scansione",
     notConfigured: "Nessuna email configurata.",
+    importHistBtn: "📥 Importa Tutto lo Storico Email",
+    importHistLoading: "⏳ Scansione di tutta la posta... può richiedere alcuni minuti",
+    importHistDesc: "Legge TUTTE le email già inviate da Francesca (senza limite di data). Sicuro: non duplica mai i dati esistenti.",
+    importHistSuccess: "✅ Importazione completata!",
+    importHistError: "❌ Errore nell'importazione. Controlla il bot email.",
   },
 };
 
@@ -108,6 +118,10 @@ export default function AdminPage() {
   const [emailForm, setEmailForm] = useState({ email: "", app_password: "", imap_server: "imap.mail.yahoo.com", imap_port: 993, active: true });
   const [botStatus, setBotStatus] = useState<any>(null);
   const [emailLoading, setEmailLoading] = useState(false);
+
+  // States para importação histórica
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
 
   const t = T[lang];
 
@@ -238,6 +252,31 @@ export default function AdminPage() {
       showToast(t.error);
     } finally {
       setEmailLoading(false);
+    }
+  }
+
+  async function handleImportHistory() {
+    if (!confirm(lang === "pt" ? "Isso pode demorar alguns minutos. Continuar?" : "Questo potrebbe richiedere alcuni minuti. Continuare?")) return;
+    setImportLoading(true);
+    setImportResult(null);
+    try {
+      const res = await fetch("/api/admin/email-import-history", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setImportResult({ ok: true, ...data });
+        showToast(t.importHistSuccess);
+      } else {
+        setImportResult({ ok: false, message: data.detail || t.importHistError });
+        showToast(t.importHistError);
+      }
+    } catch {
+      setImportResult({ ok: false, message: t.importHistError });
+      showToast(t.importHistError);
+    } finally {
+      setImportLoading(false);
     }
   }
 
@@ -484,6 +523,47 @@ export default function AdminPage() {
             <button className={styles.btnCreate} type="submit" disabled={emailLoading} style={{ background: "linear-gradient(135deg, #a78bfa, #6366f1)", marginTop: 12 }}>
               {emailLoading ? t.testConnectionLabel : `🚀 ${t.saveEmailBtn}`}
             </button>
+
+            {/* ── Botão de importação histórica ── */}
+            <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.45)", marginBottom: 10, lineHeight: 1.4 }}>
+                📬 {t.importHistDesc}
+              </p>
+
+              {importResult && (
+                <div style={{
+                  background: importResult.ok ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)",
+                  border: `1px solid ${importResult.ok ? "rgba(52,211,153,0.3)" : "rgba(248,113,113,0.3)"}`,
+                  borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: "0.78rem"
+                }}>
+                  {importResult.ok ? (
+                    <>
+                      <div style={{ color: "#34d399", fontWeight: 700, marginBottom: 4 }}>{t.importHistSuccess}</div>
+                      <div style={{ color: "rgba(255,255,255,0.7)" }}>📨 E-mails encontrados: <strong>{importResult.emails_found}</strong></div>
+                      <div style={{ color: "rgba(255,255,255,0.7)" }}>📄 PDFs processados: <strong>{importResult.pdfs_found}</strong></div>
+                      <div style={{ color: "#34d399" }}>💾 Turnos novos importados: <strong>{importResult.shifts_imported}</strong></div>
+                    </>
+                  ) : (
+                    <div style={{ color: "#f87171" }}>{importResult.message}</div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleImportHistory}
+                disabled={importLoading}
+                style={{
+                  width: "100%", padding: "13px 0", borderRadius: 12, border: "none",
+                  background: importLoading ? "rgba(255,255,255,0.06)" : "linear-gradient(135deg, #f59e0b, #d97706)",
+                  color: importLoading ? "rgba(255,255,255,0.3)" : "#fff",
+                  fontWeight: 700, fontSize: "0.9rem", cursor: importLoading ? "not-allowed" : "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                {importLoading ? t.importHistLoading : t.importHistBtn}
+              </button>
+            </div>
           </form>
         )}
       </div>

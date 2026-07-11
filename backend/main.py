@@ -466,6 +466,23 @@ async def get_my_shifts(
     return {"shifts": shifts, "total": len(shifts)}
 
 
+@app.get("/api/shifts/available-months")
+async def get_available_months(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db)
+):
+    """Retorna a lista de meses (YYYY-MM) que possuem turnos cadastrados na base."""
+    name_query = f"%{current_user['name'].split()[0].strip()}%"
+    rows = await db.execute("""
+        SELECT DISTINCT SUBSTR(date, 1, 7) as year_month 
+        FROM shifts 
+        WHERE worker_name LIKE ?
+        ORDER BY year_month DESC
+    """, (name_query,))
+    months = [r["year_month"] for r in await rows.fetchall() if r["year_month"]]
+    return {"months": months}
+
+
 @app.get("/api/shifts/analytics")
 async def get_my_analytics(
     current_user: dict = Depends(get_current_user),
@@ -580,10 +597,21 @@ async def get_my_analytics(
 
 
 @app.get("/api/shifts/week")
-async def get_week_shifts(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
-    """Retorna os turnos da semana atual."""
+async def get_week_shifts(
+    date_ref: Optional[str] = None, # formato: YYYY-MM-DD
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db)
+):
+    """Retorna os turnos da semana a partir de uma data de referência."""
     name_query = f"%{current_user['name'].split()[0].strip()}%"
-    today = datetime.now().date()
+    if date_ref:
+        try:
+            today = datetime.strptime(date_ref, "%Y-%m-%d").date()
+        except Exception:
+            today = datetime.now().date()
+    else:
+        today = datetime.now().date()
+        
     start_of_week = today - timedelta(days=today.weekday() + 1) # Domingo ou Segunda
     
     week_days = []
@@ -616,11 +644,18 @@ async def get_week_shifts(current_user: dict = Depends(get_current_user), db=Dep
 
 
 @app.get("/api/shifts/stats")
-async def get_stats(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
-    """Estatísticas do mês atual."""
+async def get_stats(
+    month: Optional[str] = None, # formato: YYYY-MM
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_db)
+):
+    """Estatísticas do mês atual ou selecionado."""
     name_query = f"%{current_user['name'].split()[0].strip()}%"
     now = datetime.now()
-    month_prefix = now.strftime("%Y-%m-%d")[:7] # YYYY-MM
+    if not month:
+        month = now.strftime("%Y-%m-%d")[:7]
+        
+    month_prefix = month
     
     row_shifts = await db.execute("""
         SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
@@ -718,4 +753,158 @@ async def get_history(current_user: dict = Depends(get_current_user), db=Depends
     """)
     schedules = [dict(r) for r in await rows.fetchall()]
     return {"schedules": schedules}
+
+
+# ─── Importação Histórica de E-mails ──────────────────────────────────────────
+
+@app.post("/api/admin/email-import-history")
+async def import_email_history(admin=Depends(require_admin), db=Depends(get_db)):
+    """
+    Varre TODA a caixa IMAP sem filtro de data ou UNSEEN.
+    Busca todos os PDFs enviados pela Francesca e salva no banco.
+    Seguro: usa ON CONFLICT DO NOTHING para nunca duplicar.
+    """
+    import imaplib as _imap_lib
+    import email as _email_lib
+    import uuid as _uuid
+    from email.header import decode_header as _decode_header
+
+    SENDER = "francesca.cassiano@gtsocieta.com"
+
+    # 1. Buscar credenciais do banco
+    row = await db.execute(
+        "SELECT email, app_password, imap_server, imap_port FROM email_settings WHERE active=1 LIMIT 1"
+    )
+    cfg = await row.fetchone()
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Nenhuma configuração de e-mail ativa.")
+
+    email_addr, app_pass, imap_host, imap_port = cfg["email"], cfg["app_password"], cfg["imap_server"], cfg["imap_port"]
+
+    def _decode_str(val):
+        if not val:
+            return ""
+        parts = _decode_header(val)
+        result = []
+        for p, enc in parts:
+            if isinstance(p, bytes):
+                result.append(p.decode(enc or "utf-8", errors="replace"))
+            else:
+                result.append(str(p))
+        return "".join(result)
+
+    def _save_shifts(shifts, filename, conn_sync):
+        if not shifts:
+            return 0
+        type_map = {"morning": "M", "afternoon": "P", "night": "N", "dayoff": "R"}
+        inserted = 0
+        cur = conn_sync.cursor()
+        uploaded_at = datetime.utcnow().isoformat()
+        for s in shifts:
+            stype = type_map.get(s.get("shift_type", "M"), s.get("shift_type", "M"))
+            try:
+                cur.execute("""
+                    INSERT INTO shifts (id, worker_name, date, start_time, end_time,
+                                        shift_type, duration_hours, notes, uploaded_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(worker_name, date) DO NOTHING
+                """, (
+                    str(_uuid.uuid4()),
+                    s.get("worker_name", ""),
+                    s.get("date", ""),
+                    s.get("start_time"),
+                    s.get("end_time"),
+                    stype,
+                    s.get("duration_hours"),
+                    s.get("notes"),
+                    "historico@email.auto",
+                    uploaded_at,
+                ))
+                if cur.rowcount > 0:
+                    inserted += 1
+            except Exception:
+                pass
+        # Registrar upload
+        try:
+            cur.execute("""
+                INSERT INTO uploads (id, filename, uploaded_by, uploaded_at, status, shifts_count)
+                VALUES (?, ?, ?, ?, 'ok', ?)
+            """, (str(_uuid.uuid4()), f"Histórico - {filename}", "historico@email.auto", uploaded_at, inserted))
+        except Exception:
+            pass
+        conn_sync.commit()
+        return inserted
+
+    # 2. Conectar IMAP e varrer TUDO
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    def _run_import():
+        from services.pdf_parser import PDFParser
+        parser = PDFParser()
+        DB_PATH = os.getenv("DB_PATH", "/data/controllo.db")
+        conn_sync = sqlite3.connect(DB_PATH)
+
+        imap = _imap_lib.IMAP4_SSL(imap_host, imap_port)
+        imap.login(email_addr, app_pass)
+        imap.select("INBOX")
+
+        # Buscar TODOS os e-mails da Francesca, sem filtro UNSEEN
+        status, messages = imap.search(None, f'FROM "{SENDER}"')
+        if status != "OK":
+            imap.logout()
+            conn_sync.close()
+            return {"error": "Falha ao buscar e-mails"}
+
+        email_ids = messages[0].split()
+        total_emails = len(email_ids)
+        total_pdfs = 0
+        total_novos = 0
+
+        for eid in email_ids:
+            try:
+                st, msg_data = imap.fetch(eid, "(RFC822)")
+                if st != "OK":
+                    continue
+                msg = _email_lib.message_from_bytes(msg_data[0][1])
+
+                for part in msg.walk():
+                    ct = part.get_content_type()
+                    fn = _decode_str(part.get_filename() or "")
+                    is_pdf = (ct == "application/pdf") or \
+                             (ct == "application/octet-stream" and fn.lower().endswith(".pdf"))
+                    if not is_pdf:
+                        continue
+                    pdf_bytes = part.get_payload(decode=True)
+                    if not pdf_bytes:
+                        continue
+                    total_pdfs += 1
+                    try:
+                        shifts = parser.parse_from_bytes(pdf_bytes)
+                        novos = _save_shifts(shifts, fn or f"email_hist.pdf", conn_sync)
+                        total_novos += novos
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        imap.logout()
+        conn_sync.close()
+        return {
+            "emails_found": total_emails,
+            "pdfs_found": total_pdfs,
+            "shifts_imported": total_novos,
+        }
+
+    try:
+        result = await loop.run_in_executor(None, _run_import)
+        logger.info(f"[IMPORT-HIST] {result}")
+        return {
+            "success": True,
+            "message": f"Importação concluída: {result.get('shifts_imported', 0)} turnos novos de {result.get('pdfs_found', 0)} PDFs.",
+            **result,
+        }
+    except Exception as e:
+        logger.error(f"[IMPORT-HIST] Erro: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro na importação histórica: {str(e)}")
 
