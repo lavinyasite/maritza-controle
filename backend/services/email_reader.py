@@ -5,7 +5,7 @@ import logging
 from email.header import decode_header
 from datetime import datetime, timedelta
 from typing import Optional
-from .email_providers import get_provider_config
+from utils.email_providers import get_provider_config
 
 logger = logging.getLogger(__name__)
 
