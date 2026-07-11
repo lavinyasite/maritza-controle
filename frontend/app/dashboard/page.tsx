@@ -46,7 +46,7 @@ const T = {
     curiosities: "Destaques do Trabalho",
     mostWorkedDayLabel: "Dia mais trabalhado",
     weekendsLabel: "Finais de Semana",
-    weekendText: "Trabalhou {w} sáb/dom | Folgou {o} sáb/dom",
+    weekendText: "Sábados: {sw} trab / {so} folg | Domingos: {suw} trab / {suo} folg",
     vacationsLabel: "Férias & Descanso",
     vacationStreak: "Férias detectadas: {d} dias seguidos (de {s} a {e})",
     noVacations: "Nenhum período longo de folga detectado no ano.",
@@ -94,7 +94,7 @@ const T = {
     curiosities: "Dettagli di Lavoro",
     mostWorkedDayLabel: "Giorno più lavorato",
     weekendsLabel: "Fine Settimana",
-    weekendText: "Lavorato {w} sab/dom | Libero {o} sab/dom",
+    weekendText: "Sabato: {sw} lav / {so} lib | Domenica: {suw} lav / {suo} lib",
     vacationsLabel: "Ferie & Riposo",
     vacationStreak: "Ferie rilevate: {d} giorni consecutivi (da {s} a {e})",
     noVacations: "Nessun lungo periodo di riposo rilevato quest'anno.",
@@ -671,7 +671,11 @@ export default function DashboardPage() {
                     <div className={styles.statMetric}>
                       <span className={styles.metricLabel}>{t.weekendsLabel}</span>
                       <span className={styles.metricValue}>
-                        {t.weekendText.replace("{w}", String(analytics.weekends?.worked)).replace("{o}", String(analytics.weekends?.off))}
+                        {t.weekendText
+                          .replace("{sw}", String(analytics.weekends?.saturday_worked ?? 0))
+                          .replace("{so}", String(analytics.weekends?.saturday_off ?? 0))
+                          .replace("{suw}", String(analytics.weekends?.sunday_worked ?? 0))
+                          .replace("{suo}", String(analytics.weekends?.sunday_off ?? 0))}
                       </span>
                     </div>
                   </div>

@@ -519,35 +519,45 @@ async def get_my_analytics(
                 pass
                 
     dates = sorted(dates)
+
+    # Obter todas as datas do ano que possuem qualquer turno importado na base (datas válidas)
+    row_active_dates = await db.execute("""
+        SELECT DISTINCT date FROM shifts 
+        WHERE date LIKE ?
+    """, (year_prefix,))
+    active_dates = set()
+    for r in await row_active_dates.fetchall():
+        if r[0]:
+            try:
+                active_dates.add(datetime.strptime(r[0], "%Y-%m-%d").date())
+            except:
+                pass
     
-    # 3. Calcular folgas implícitas no intervalo ativo
+    # 3. Calcular folgas e fins de semana usando apenas datas ativas das escalas
     off_dates = []
     total_off = 0
-    weekend_worked = 0
-    weekend_off = 0
+    sat_worked = 0
+    sat_off = 0
+    sun_worked = 0
+    sun_off = 0
     
     if dates:
-        first_date = dates[0].date()
-        last_date = dates[-1].date()
-        
-        # Gerar todas as datas do primeiro ao último turno do ano
-        all_dates = []
-        curr = first_date
-        while curr <= last_date:
-            all_dates.append(curr)
-            curr += timedelta(days=1)
-            
         worked_dates_set = {d.date() for d in dates}
-        off_dates = [d for d in all_dates if d not in worked_dates_set]
+        off_dates = sorted([d for d in active_dates if d not in worked_dates_set])
         total_off = len(off_dates)
         
-        # Calcular fins de semana trabalhados / folgados
-        for d in all_dates:
-            if d.weekday() in (5, 6): # 5=Sáb, 6=Dom
+        # Calcular fins de semana (Sábado e Domingo separados) usando apenas datas ativas
+        for d in active_dates:
+            if d.weekday() == 5: # Sábado
                 if d in worked_dates_set:
-                    weekend_worked += 1
+                    sat_worked += 1
                 else:
-                    weekend_off += 1
+                    sat_off += 1
+            elif d.weekday() == 6: # Domingo
+                if d in worked_dates_set:
+                    sun_worked += 1
+                else:
+                    sun_off += 1
                     
     # 4. Dia da semana mais trabalhado
     weekday_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0} # 0=Seg, 6=Dom
@@ -594,8 +604,10 @@ async def get_my_analytics(
             "count": max_day_count
         },
         "weekends": {
-            "worked": weekend_worked,
-            "off": weekend_off
+            "saturday_worked": sat_worked,
+            "saturday_off": sat_off,
+            "sunday_worked": sun_worked,
+            "sunday_off": sun_off
         },
         "vacations": vacations,
         "vacations_count": len(vacations)
