@@ -8,10 +8,10 @@ Suporta multi-usuário, JWT auth, upload de PDF e agente OpenAI.
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from typing import Optional
 import os
 import logging
@@ -45,22 +45,27 @@ app.add_middleware(
 )
 
 # ─── Auth ─────────────────────────────────────
-pwd_context  = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 # Usuários demo (em produção: banco de dados)
 DEMO_USERS = {
     "maritza@demo.com": {
         "name": "Maritza",
         "email": "maritza@demo.com",
-        "hashed_password": pwd_context.hash("demo123"),
+        "hashed_password": bcrypt.hashpw(b"demo123", bcrypt.gensalt()).decode(),
         "lang": "pt",
         "role": "worker",
     },
     "admin@controllo.com": {
         "name": "Admin",
         "email": "admin@controllo.com",
-        "hashed_password": pwd_context.hash("admin123"),
+        "hashed_password": bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode(),
         "lang": "it",
         "role": "admin",
     },
@@ -104,7 +109,7 @@ def health_check():
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(body: LoginRequest):
     user = DEMO_USERS.get(body.email)
-    if not user or not pwd_context.verify(body.password, user["hashed_password"]):
+    if not user or not verify_password(body.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos")
     token = create_token({"sub": user["email"]})
     return TokenResponse(
@@ -119,7 +124,7 @@ def login(body: LoginRequest):
 def token_form(form: OAuth2PasswordRequestForm = Depends()):
     """Compatibilidade com OAuth2 form (Swagger UI)"""
     user = DEMO_USERS.get(form.username)
-    if not user or not pwd_context.verify(form.password, user["hashed_password"]):
+    if not user or not verify_password(form.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
     token = create_token({"sub": user["email"]})
     return {"access_token": token, "token_type": "bearer"}
