@@ -82,6 +82,17 @@ async def init_db():
                 shifts_count INTEGER DEFAULT 0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS email_settings (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                email         TEXT UNIQUE NOT NULL,
+                app_password  TEXT NOT NULL,
+                imap_server   TEXT NOT NULL,
+                imap_port     INTEGER NOT NULL DEFAULT 993,
+                active        INTEGER NOT NULL DEFAULT 1,
+                last_checked  TEXT
+            )
+        """)
         await db.commit()
 
         # Inserir admin padrão
@@ -97,12 +108,60 @@ async def init_db():
             logger.info(f"✅ Admin criado: {ADMIN_EMAIL}")
 
 
+from apscheduler.schedulers.background import BackgroundScheduler
+import asyncio
+
+def check_emails_job():
+    """Tarefa periódica do Scheduler para monitorar a caixa de e-mails."""
+    import sqlite3
+    
+    DB_PATH = os.getenv("DB_PATH", "/data/controllo.db")
+    if not os.path.exists(DB_PATH):
+        return
+        
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT email, app_password, imap_server, imap_port FROM email_settings WHERE active = 1 LIMIT 1")
+        row = cursor.fetchone()
+        if not row:
+            return
+            
+        email_addr, app_pass, imap_host, imap_port = row
+        logger.info(f"[JOB] Rodando monitor inteligente de escala para: {email_addr}")
+        
+        from services.email_agent import ScheduleAgent
+        agent = ScheduleAgent()
+        
+        # Como o scheduler roda em thread síncrona do background, criamos um event loop temporário
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(agent.run(email_addr, app_pass))
+        loop.close()
+        
+        # Atualiza data da última checagem
+        now_str = datetime.utcnow().isoformat()
+        cursor.execute("UPDATE email_settings SET last_checked = ? WHERE email = ?", (now_str, email_addr))
+        conn.commit()
+        logger.info(f"[JOB] Resultado: {result[:150]}...")
+    except Exception as e:
+        logger.error(f"[JOB] Erro ao monitorar e-mails no background: {e}")
+    finally:
+        conn.close()
+
+scheduler = BackgroundScheduler()
 
 # ─── Lifecycle ────────────────────────────────
 @asynccontextmanager
 async def lifespan(app):
     await init_db()
+    # Adicionar job do scheduler a cada 10 minutos
+    scheduler.add_job(check_emails_job, "interval", minutes=10, id="email_monitor_job", replace_existing=True)
+    scheduler.start()
+    logger.info("⏰ Scheduler de monitoramento de escala iniciado (10 minutos)")
     yield
+    scheduler.shutdown()
+
 
 # ─── App ──────────────────────────────────────
 app = FastAPI(
@@ -180,6 +239,14 @@ class CreateUserRequest(BaseModel):
     password: str
     lang: Optional[str] = "it"
     role: Optional[str] = "worker"
+
+class EmailSettingsRequest(BaseModel):
+    email: str
+    app_password: str
+    imap_server: Optional[str] = "imap.mail.yahoo.com"
+    imap_port: Optional[int] = 993
+    active: Optional[bool] = True
+
 
 
 # ─── Rotas de saúde ───────────────────────────
@@ -319,7 +386,58 @@ async def admin_delete_user(user_id: str, admin=Depends(require_admin), db=Depen
     return {"message": f"Usuário {user['name']} removido"}
 
 
+@app.get("/api/admin/email-settings")
+async def get_email_settings(admin=Depends(require_admin), db=Depends(get_db)):
+    row = await db.execute("SELECT id, email, imap_server, imap_port, active, last_checked FROM email_settings LIMIT 1")
+    settings = await row.fetchone()
+    if not settings:
+        return {"configured": False}
+    return {
+        "configured": True,
+        "id": settings["id"],
+        "email": settings["email"],
+        "imap_server": settings["imap_server"],
+        "imap_port": settings["imap_port"],
+        "active": bool(settings["active"]),
+        "last_checked": settings["last_checked"]
+    }
+
+@app.post("/api/admin/email-settings")
+async def save_email_settings(body: EmailSettingsRequest, admin=Depends(require_admin), db=Depends(get_db)):
+    # 1. Testar conexão IMAP antes de salvar
+    from services.email_reader import EmailReader
+    reader = EmailReader(body.email, body.app_password)
+    if body.imap_server:
+        reader.provider = {"host": body.imap_server, "port": body.imap_port, "name": "Custom"}
+        
+    if not reader.connect():
+        raise HTTPException(
+            status_code=400, 
+            detail="Não foi possível conectar ao servidor de e-mail. Verifique a conta e gere uma Senha de Aplicativo IMAP."
+        )
+    reader.disconnect()
+
+    # 2. Salvar no banco
+    await db.execute("DELETE FROM email_settings")
+    await db.execute("""
+        INSERT INTO email_settings (email, app_password, imap_server, imap_port, active)
+        VALUES (?, ?, ?, ?, ?)
+    """, (body.email, body.app_password, body.imap_server, body.imap_port, 1 if body.active else 0))
+    await db.commit()
+    
+    # 3. Disparar checagem assíncrona inicial
+    try:
+        from services.email_agent import ScheduleAgent
+        agent = ScheduleAgent()
+        asyncio.create_task(agent.run(body.email, body.app_password))
+    except Exception as e:
+        logger.error(f"Erro ao disparar check de e-mail inicial: {e}")
+        
+    return {"message": "Configurações de e-mail salvas e monitor ativo!"}
+
+
 # ─── Turnos e escalas ─────────────────────────
+
 
 @app.get("/api/shifts/my-shifts")
 async def get_my_shifts(

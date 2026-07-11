@@ -8,7 +8,7 @@ const T = {
   pt: {
     title: "Painel Admin",
     subtitle: "Gestão de Usuários",
-    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário" },
+    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário", email: "Robô de E-mail" },
     name: "Nome", email: "E-mail", lang: "Idioma", role: "Função",
     password: "Senha", confirm: "Confirmar Senha",
     approve: "Aprovar", block: "Bloquear", remove: "Remover",
@@ -27,11 +27,24 @@ const T = {
     nameHolder: "Nome completo",
     emailHolder: "email@exemplo.com",
     passHolder: "Senha segura",
+    emailSettingsTitle: "Monitor de E-mails do Yahoo",
+    emailSettingsDesc: "Configure a conta do Yahoo que recebe as escalas da empresa em formato PDF. O robô vai ler a caixa de entrada a cada 10 minutos, processar o PDF com IA e atualizar os turnos de todos de forma automática.",
+    appPassLabel: "Senha de Aplicativo Yahoo",
+    appPassDesc: "Atenção: Não use sua senha normal de login do Yahoo. Você precisa entrar na Segurança da Conta do Yahoo e clicar em 'Gerar Senha de Aplicativo'.",
+    imapServerLabel: "Servidor IMAP",
+    imapPortLabel: "Porta IMAP",
+    saveEmailBtn: "Salvar e Ativar Robô",
+    testConnectionLabel: "Testando conexão com o Yahoo... ⏳",
+    successSaveEmail: "Robô ativado com sucesso! Primeira varredura disparada.",
+    botStatusActive: "Robô Ativo e Monitorando",
+    botStatusInactive: "Robô Desativado",
+    lastCheckedLabel: "Última varredura",
+    notConfigured: "Nenhum e-mail configurado ainda.",
   },
   it: {
     title: "Pannello Admin",
     subtitle: "Gestione Utenti",
-    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente" },
+    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente", email: "Bot Email" },
     name: "Nome", email: "Email", lang: "Lingua", role: "Ruolo",
     password: "Password", confirm: "Conferma Password",
     approve: "Approva", block: "Blocca", remove: "Rimuovi",
@@ -50,6 +63,19 @@ const T = {
     nameHolder: "Nome completo",
     emailHolder: "email@esempio.com",
     passHolder: "Password sicura",
+    emailSettingsTitle: "Monitor Email Yahoo",
+    emailSettingsDesc: "Configura l'account Yahoo che riceve le scale in formato PDF. Il bot leggerà la posta in arrivo ogni 10 minuti, elaborerà il PDF con l'IA e aggiornerà i turni di tutti in modo automatico.",
+    appPassLabel: "Password dell'applicazione Yahoo",
+    appPassDesc: "Attenzione: Non usare la tua password di accesso normale Yahoo. Devi andare su Sicurezza account di Yahoo e fare clic su 'Genera password dell'applicazione'.",
+    imapServerLabel: "Server IMAP",
+    imapPortLabel: "Porta IMAP",
+    saveEmailBtn: "Salva e Attiva Bot",
+    testConnectionLabel: "Test di connessione a Yahoo in corso... ⏳",
+    successSaveEmail: "Bot attivato con successo! Prima scansione avviata.",
+    botStatusActive: "Bot Attivo e in Scansione",
+    botStatusInactive: "Bot Disattivato",
+    lastCheckedLabel: "Ultima scansione",
+    notConfigured: "Nessuna email configurata.",
   },
 };
 
@@ -69,12 +95,19 @@ function roleBadge(role: string) {
 export default function AdminPage() {
   const router = useRouter();
   const [lang, setLang] = useState<"pt" | "it">("pt");
-  const [tab, setTab] = useState<"pending" | "all" | "create">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "create" | "email">("pending");
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
+  
+  // States para formulário de usuário
   const [form, setForm] = useState({ name: "", email: "", password: "", lang: "it", role: "worker" });
   const [submitting, setSubmitting] = useState(false);
+
+  // States para Robô de e-mail
+  const [emailForm, setEmailForm] = useState({ email: "", app_password: "", imap_server: "imap.mail.yahoo.com", imap_port: 993, active: true });
+  const [botStatus, setBotStatus] = useState<any>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
 
   const t = T[lang];
 
@@ -82,6 +115,7 @@ export default function AdminPage() {
     const l = localStorage.getItem("cs_lang") as "pt" | "it";
     if (l === "pt" || l === "it") setLang(l);
     fetchUsers();
+    fetchEmailSettings();
   }, []);
 
   const getToken = () => localStorage.getItem("cs_token") || "";
@@ -102,9 +136,30 @@ export default function AdminPage() {
     finally { setLoading(false); }
   }
 
+  async function fetchEmailSettings() {
+    try {
+      const res = await fetch("/api/admin/email-settings", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBotStatus(data);
+        if (data.configured) {
+          setEmailForm({
+            email: data.email,
+            app_password: "", // Não trazer no formulário por segurança
+            imap_server: data.imap_server,
+            imap_port: data.imap_port,
+            active: data.active
+          });
+        }
+      }
+    } catch { /* ignored */ }
+  }
+
   function showToast(msg: string) {
     setToast(msg);
-    setTimeout(() => setToast(""), 3000);
+    setTimeout(() => setToast(""), 4000);
   }
 
   async function approve(id: string) {
@@ -163,12 +218,35 @@ export default function AdminPage() {
     finally { setSubmitting(false); }
   }
 
+  async function saveEmailSettings(e: React.FormEvent) {
+    e.preventDefault();
+    setEmailLoading(true);
+    try {
+      const res = await fetch("/api/admin/email-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(emailForm),
+      });
+      if (res.ok) {
+        showToast(t.successSaveEmail);
+        fetchEmailSettings();
+      } else {
+        const d = await res.json();
+        showToast(d.detail || t.error);
+      }
+    } catch {
+      showToast(t.error);
+    } finally {
+      setEmailLoading(false);
+    }
+  }
+
   const pending = users.filter(u => u.role === "pending");
   const displayed = tab === "pending" ? pending : tab === "all" ? users : [];
 
   function formatDate(dt: string) {
     if (!dt) return "—";
-    return new Date(dt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    return new Date(dt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   }
 
   return (
@@ -198,7 +276,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className={styles.tabs}>
-          {(["pending", "all", "create"] as const).map(tb => (
+          {(["pending", "all", "create", "email"] as const).map(tb => (
             <button
               key={tb}
               className={`${styles.tab} ${tab === tb ? styles.tabActive : ""}`}
@@ -309,6 +387,102 @@ export default function AdminPage() {
             </div>
             <button className={styles.btnCreate} type="submit" disabled={submitting}>
               {submitting ? "⏳..." : `✅ ${t.create}`}
+            </button>
+          </form>
+        )}
+
+        {/* Email Settings Tab */}
+        {tab === "email" && (
+          <form className={styles.form} onSubmit={saveEmailSettings}>
+            <div style={{ marginBottom: 12 }}>
+              <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#fff", margin: 0 }}>
+                {t.emailSettingsTitle}
+              </h2>
+              <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.45)", margin: "4px 0 16px", lineHeight: 1.4 }}>
+                {t.emailSettingsDesc}
+              </p>
+
+              {botStatus && (
+                <div style={{
+                  background: botStatus.configured && botStatus.active ? "rgba(52, 211, 153, 0.08)" : "rgba(255, 255, 255, 0.04)",
+                  border: botStatus.configured && botStatus.active ? "1px solid rgba(52, 211, 153, 0.25)" : "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 12, padding: 14, marginBottom: 20, fontSize: "0.8rem"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600 }}>Status:</span>
+                    <span style={{
+                      color: botStatus.configured && botStatus.active ? "#34d399" : "#f87171",
+                      fontWeight: 700
+                    }}>
+                      {botStatus.configured && botStatus.active ? t.botStatusActive : t.botStatusInactive}
+                    </span>
+                  </div>
+                  {botStatus.configured && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "rgba(255,255,255,0.5)" }}>
+                        <span>E-mail:</span>
+                        <span style={{ color: "#fff" }}>{botStatus.email}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+                        <span>{t.lastCheckedLabel}:</span>
+                        <span style={{ color: "#fff" }}>{formatDate(botStatus.last_checked)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.formRow}>
+              <label>E-mail do Yahoo</label>
+              <input
+                type="email"
+                className={styles.input}
+                placeholder="escala@yahoo.com"
+                value={emailForm.email}
+                onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className={styles.formRow}>
+              <label>{t.appPassLabel}</label>
+              <input
+                type="password"
+                className={styles.input}
+                placeholder="xxxx xxxx xxxx xxxx"
+                value={emailForm.app_password}
+                onChange={e => setEmailForm({ ...emailForm, app_password: e.target.value })}
+                required
+              />
+              <p style={{ fontSize: "0.7rem", color: "#a78bfa", marginTop: 4, lineHeight: 1.3 }}>
+                ℹ️ {t.appPassDesc}
+              </p>
+            </div>
+
+            <div className={styles.formRow}>
+              <label>{t.imapServerLabel}</label>
+              <input
+                className={styles.input}
+                value={emailForm.imap_server}
+                onChange={e => setEmailForm({ ...emailForm, imap_server: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className={styles.formRow}>
+              <label>{t.imapPortLabel}</label>
+              <input
+                type="number"
+                className={styles.input}
+                value={emailForm.imap_port}
+                onChange={e => setEmailForm({ ...emailForm, imap_port: parseInt(e.target.value) || 993 })}
+                required
+              />
+            </div>
+
+            <button className={styles.btnCreate} type="submit" disabled={emailLoading} style={{ background: "linear-gradient(135deg, #a78bfa, #6366f1)", marginTop: 12 }}>
+              {emailLoading ? t.testConnectionLabel : `🚀 ${t.saveEmailBtn}`}
             </button>
           </form>
         )}
