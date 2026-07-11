@@ -388,7 +388,7 @@ export default function DashboardPage() {
                 >
                   {availableMonths.length === 0 ? (
                     homeMonth && (
-                      <option value={homeMonth}>
+                      <option value={homeMonth} style={{ color: "#fff", background: "#1e1e2d" }}>
                         {(() => {
                           const [year, month] = homeMonth.split("-");
                           const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
@@ -404,7 +404,7 @@ export default function DashboardPage() {
                       const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
                       const monthNamesIt = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
                       const name = lang === "pt" ? monthNamesPt[parseInt(month) - 1] : monthNamesIt[parseInt(month) - 1];
-                      return <option key={m} value={m}>{`${name} / ${year}`}</option>;
+                      return <option key={m} value={m} style={{ color: "#fff", background: "#1e1e2d" }}>{`${name} / ${year}`}</option>;
                     })
                   )}
                 </select>
@@ -520,12 +520,42 @@ export default function DashboardPage() {
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                 />
-                <input
-                  type="month"
+                <select
                   className={styles.monthInput}
                   value={selectedMonth}
                   onChange={e => setSelectedMonth(e.target.value)}
-                />
+                  style={{ color: "#fff", background: "#1e1e2d", border: "1px solid var(--color-border)" }}
+                >
+                  {availableMonths.length === 0 ? (
+                    selectedMonth && (
+                      <option value={selectedMonth} style={{ color: "#fff", background: "#1e1e2d" }}>
+                        {(() => {
+                          const [year, month] = selectedMonth.split("-");
+                          const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                          const monthNamesIt = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+                          const name = lang === "pt" ? monthNamesPt[parseInt(month) - 1] : monthNamesIt[parseInt(month) - 1];
+                          return `${name} / ${year}`;
+                        })()}
+                      </option>
+                    )
+                  ) : (
+                    availableMonths.map((m) => {
+                      const [year, month] = m.split("-");
+                      const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                      const monthNamesIt = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+                      const name = lang === "pt" ? monthNamesPt[parseInt(month) - 1] : monthNamesIt[parseInt(month) - 1];
+                      return (
+                        <option 
+                          key={m} 
+                          value={m}
+                          style={{ color: "#fff", background: "#1e1e2d" }}
+                        >
+                          {`${name} / ${year}`}
+                        </option>
+                      );
+                    })
+                  )}
+                </select>
               </div>
 
               {/* Filtros rápidos por turno */}
