@@ -121,6 +121,7 @@ export default function DashboardPage() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [homeMonth, setHomeMonth] = useState<string>("");
+  const [weekRefDate, setWeekRefDate] = useState<string>("");
   
   // Estados de UI
   const [loading, setLoading] = useState(true);
@@ -196,7 +197,9 @@ export default function DashboardPage() {
       if (resStats.ok) setStats(await resStats.json());
 
       // 4. Get week shifts
-      const resWeek = await fetch(`/api/shifts/week?date_ref=${defaultMonth}-15`, {
+      const initialWeekRef = `${defaultMonth}-15`;
+      setWeekRefDate(initialWeekRef);
+      const resWeek = await fetch(`/api/shifts/week?date_ref=${initialWeekRef}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (resWeek.ok) {
@@ -230,7 +233,9 @@ export default function DashboardPage() {
       });
       if (resStats.ok) setStats(await resStats.json());
 
-      const resWeek = await fetch(`/api/shifts/week?date_ref=${month}-15`, {
+      const weekRef = `${month}-15`;
+      setWeekRefDate(weekRef);
+      const resWeek = await fetch(`/api/shifts/week?date_ref=${weekRef}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (resWeek.ok) {
@@ -239,6 +244,29 @@ export default function DashboardPage() {
       }
     } catch { /* ignored */ }
   }
+
+  async function changeWeek(offsetDays: number) {
+    if (!weekRefDate) return;
+    try {
+      const parts = weekRefDate.split("-");
+      const dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      dt.setDate(dt.getDate() + offsetDays);
+      
+      const newRef = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      setWeekRefDate(newRef);
+
+      const resWeek = await fetch(`/api/shifts/week?date_ref=${newRef}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (resWeek.ok) {
+        const weekData = await resWeek.json();
+        setWeek(weekData.week || []);
+      }
+    } catch { /* ignored */ }
+  }
+
+  const handlePrevWeek = () => changeWeek(-7);
+  const handleNextWeek = () => changeWeek(7);
 
   async function fetchMyShifts() {
     try {
@@ -434,9 +462,53 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              {/* Semana atual */}
+              {/* Semana atual com Navegação */}
               <section className={styles.section}>
-                <h2 className={styles.sectionTitle}>{t.weekTitle}</h2>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <h2 className={styles.sectionTitle} style={{ margin: 0 }}>{t.weekTitle}</h2>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button 
+                      onClick={handlePrevWeek}
+                      style={{
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "8px",
+                        color: "#fff",
+                        width: "36px",
+                        height: "36px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontWeight: "bold",
+                        fontSize: "0.9rem"
+                      }}
+                      title="Semana Anterior"
+                    >
+                      ◀
+                    </button>
+                    <button 
+                      onClick={handleNextWeek}
+                      style={{
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "8px",
+                        color: "#fff",
+                        width: "36px",
+                        height: "36px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontWeight: "bold",
+                        fontSize: "0.9rem"
+                      }}
+                      title="Próxima Semana"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                </div>
                 <div className={styles.weekRow}>
                   {week.map((day, i) => {
                     const isToday = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) === day.date;
@@ -445,7 +517,21 @@ export default function DashboardPage() {
                         <div className={styles.dayName}>{lang === "pt" ? day.day_pt : day.day_it}</div>
                         <div className={styles.dayDate}>{day.date.split("/")[0]}</div>
                         <ShiftBadge type={day.shift} lang={lang} size="sm" />
-                        {day.time && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{day.time.split(" - ")[0]}</span>}
+                        {day.time && (
+                          <span 
+                            style={{ 
+                              fontSize: "8px", 
+                              color: "rgba(255,255,255,0.5)", 
+                              marginTop: 4, 
+                              whiteSpace: "nowrap",
+                              background: "rgba(255,255,255,0.04)",
+                              padding: "2px 4px",
+                              borderRadius: "4px"
+                            }}
+                          >
+                            {day.time.replace(" - ", "-")}
+                          </span>
+                        )}
                         {isToday && <div className={styles.todayDot} />}
                       </div>
                     );
