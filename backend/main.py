@@ -612,7 +612,31 @@ async def get_week_shifts(
     else:
         today = datetime.now().date()
         
-    start_of_week = today - timedelta(days=today.weekday() + 1) # Domingo ou Segunda
+    start_of_week = today - timedelta(days=today.weekday() + 1) # Domingo
+    end_of_week = start_of_week + timedelta(days=6)
+
+    # Verificar se há algum turno cadastrado na semana selecionada
+    row_count = await db.execute("""
+        SELECT COUNT(*) FROM shifts 
+        WHERE worker_name LIKE ? AND date >= ? AND date <= ? AND shift_type != 'dayoff' AND shift_type != 'R'
+    """, (name_query, start_of_week.isoformat(), end_of_week.isoformat()))
+    has_shifts = (await row_count.fetchone())[0] > 0
+
+    # Se a semana estiver vazia e temos um date_ref do mês, tentamos alinhar com o primeiro turno do mês
+    if not has_shifts and date_ref:
+        month_prefix = date_ref[:7]
+        row_first = await db.execute("""
+            SELECT date FROM shifts 
+            WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
+            ORDER BY date ASC LIMIT 1
+        """, (name_query, f"{month_prefix}%"))
+        first_shift = await row_first.fetchone()
+        if first_shift:
+            try:
+                today = datetime.strptime(first_shift["date"], "%Y-%m-%d").date()
+                start_of_week = today - timedelta(days=today.weekday() + 1)
+            except Exception:
+                pass
     
     week_days = []
     weekday_labels_pt = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
@@ -657,32 +681,49 @@ async def get_stats(
         
     month_prefix = month
     
+    # 1. Total de turnos e horas trabalhadas
     row_shifts = await db.execute("""
         SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
         FROM shifts 
         WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
     """, (name_query, f"{month_prefix}%"))
     stats = dict(await row_shifts.fetchone())
+    total_worked = stats.get("total_shifts") or 0
+
+    # 2. Total de folgas: dias do mês - turnos trabalhados
+    import calendar
+    try:
+        y, m = map(int, month_prefix.split("-"))
+        _, total_days = calendar.monthrange(y, m)
+    except Exception:
+        total_days = 30
+    total_off = max(0, total_days - total_worked)
     
-    row_off = await db.execute("""
-        SELECT COUNT(*) 
-        FROM shifts 
-        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
-    """, (name_query, f"{month_prefix}%"))
-    total_off = (await row_off.fetchone())[0]
-    
-    # Próximo turno
+    # 3. Próximo turno (a partir de hoje)
     today_str = now.date().isoformat()
     row_next = await db.execute("""
-        SELECT start_time, date FROM shifts 
+        SELECT start_time, date, shift_type FROM shifts 
         WHERE worker_name LIKE ? AND date >= ? AND shift_type != 'dayoff' AND shift_type != 'R'
         ORDER BY date ASC, start_time ASC LIMIT 1
     """, (name_query, today_str))
     next_shift = await row_next.fetchone()
-    next_str = next_shift["start_time"] if next_shift else "—"
+    
+    next_str = "—"
+    if next_shift:
+        try:
+            date_dt = datetime.strptime(next_shift["date"], "%Y-%m-%d")
+            date_fmt = date_dt.strftime("%d/%m")
+            stype = next_shift["shift_type"]
+            time_part = next_shift["start_time"]
+            if time_part:
+                next_str = f"{stype} - {time_part} ({date_fmt})"
+            else:
+                next_str = f"{stype} ({date_fmt})"
+        except Exception:
+            next_str = next_shift["start_time"] if next_shift["start_time"] else "—"
 
     return {
-        "shifts_this_month": stats.get("total_shifts") or 0,
+        "shifts_this_month": total_worked,
         "total_hours": stats.get("total_hours") or 0.0,
         "next_shift": next_str,
         "days_off": total_off,
