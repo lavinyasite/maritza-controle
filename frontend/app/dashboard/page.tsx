@@ -119,6 +119,8 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [allShifts, setAllShifts] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [homeMonth, setHomeMonth] = useState<string>("");
   
   // Estados de UI
   const [loading, setLoading] = useState(true);
@@ -167,14 +169,34 @@ export default function DashboardPage() {
       const userData = await resUser.json();
       setUser(userData);
 
-      // 2. Get monthly stats
-      const resStats = await fetch("/api/shifts/stats", {
+      // 2. Get available months
+      const resMonths = await fetch("/api/shifts/available-months", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      let monthsList: string[] = [];
+      if (resMonths.ok) {
+        const monthsData = await resMonths.json();
+        monthsList = monthsData.months || [];
+        setAvailableMonths(monthsList);
+      }
+
+      // Determine default month
+      const currentMonthStr = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+      const defaultMonth = monthsList.length > 0 ? monthsList[0] : currentMonthStr();
+      setHomeMonth(defaultMonth);
+      setSelectedMonth(defaultMonth);
+
+      // 3. Get monthly stats
+      const resStats = await fetch(`/api/shifts/stats?month=${defaultMonth}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (resStats.ok) setStats(await resStats.json());
 
-      // 3. Get week shifts
-      const resWeek = await fetch("/api/shifts/week", {
+      // 4. Get week shifts
+      const resWeek = await fetch(`/api/shifts/week?date_ref=${defaultMonth}-15`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (resWeek.ok) {
@@ -182,7 +204,7 @@ export default function DashboardPage() {
         setWeek(weekData.week || []);
       }
 
-      // 4. Get upload history (for admin/upload logs)
+      // 5. Get upload history (for admin/upload logs)
       const resHist = await fetch("/api/schedules/history", {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
@@ -197,6 +219,25 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleHomeMonthChange(month: string) {
+    setHomeMonth(month);
+    setSelectedMonth(month);
+    try {
+      const resStats = await fetch(`/api/shifts/stats?month=${month}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (resStats.ok) setStats(await resStats.json());
+
+      const resWeek = await fetch(`/api/shifts/week?date_ref=${month}-15`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (resWeek.ok) {
+        const weekData = await resWeek.json();
+        setWeek(weekData.week || []);
+      }
+    } catch { /* ignored */ }
   }
 
   async function fetchMyShifts() {
@@ -325,6 +366,50 @@ export default function DashboardPage() {
           {/* ──────────────────────────────────────────────────────── */}
           {activeTab === "home" && (
             <>
+              {/* Seletor de Mês da Dashboard */}
+              <div className={styles.homeMonthSelector}>
+                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>
+                  {lang === "pt" ? "📅 Escala de:" : "📅 Turni di:"}
+                </span>
+                <select
+                  value={homeMonth}
+                  onChange={(e) => handleHomeMonthChange(e.target.value)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "10px",
+                    color: "#fff",
+                    padding: "6px 12px",
+                    fontSize: "0.85rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    outline: "none"
+                  }}
+                >
+                  {availableMonths.length === 0 ? (
+                    homeMonth && (
+                      <option value={homeMonth}>
+                        {(() => {
+                          const [year, month] = homeMonth.split("-");
+                          const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                          const monthNamesIt = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+                          const name = lang === "pt" ? monthNamesPt[parseInt(month) - 1] : monthNamesIt[parseInt(month) - 1];
+                          return `${name} / ${year}`;
+                        })()}
+                      </option>
+                    )
+                  ) : (
+                    availableMonths.map((m) => {
+                      const [year, month] = m.split("-");
+                      const monthNamesPt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                      const monthNamesIt = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+                      const name = lang === "pt" ? monthNamesPt[parseInt(month) - 1] : monthNamesIt[parseInt(month) - 1];
+                      return <option key={m} value={m}>{`${name} / ${year}`}</option>;
+                    })
+                  )}
+                </select>
+              </div>
+
               {/* Stats Grid */}
               <section className={styles.statsGrid}>
                 <div className={`${styles.statCard} ${styles.statAccent}`}>
