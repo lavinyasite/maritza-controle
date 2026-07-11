@@ -6,7 +6,7 @@ Suporta multi-usuário, JWT auth, SQLite, upload de PDF e agente OpenAI.
 Admin: 1nlocker.ia@gmail.com
 """
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -802,6 +802,13 @@ async def upload_pdf(
             VALUES (?, ?, ?, ?, 'ok', ?)
         """, (upload_id, file.filename, current_user["email"], uploaded_at, inserted_count))
         
+        # Salvar os bytes no disco
+        PDFS_DIR = os.getenv("PDFS_DIR", "/data/pdfs")
+        os.makedirs(PDFS_DIR, exist_ok=True)
+        pdf_path = os.path.join(PDFS_DIR, f"{upload_id}.pdf")
+        with open(pdf_path, "wb") as f:
+            f.write(content)
+        
         await db.commit()
         return {"filename": file.filename, "shifts_found": len(shifts), "status": "success"}
     except Exception as e:
@@ -813,11 +820,56 @@ async def upload_pdf(
 async def get_history(current_user: dict = Depends(get_current_user), db=Depends(get_db)):
     """Histórico de escalas importadas do banco."""
     rows = await db.execute("""
-        SELECT filename, uploaded_at as date, shifts_count as shifts, status 
+        SELECT id, filename, uploaded_at as date, shifts_count as shifts, status 
         FROM uploads ORDER BY uploaded_at DESC LIMIT 10
     """)
     schedules = [dict(r) for r in await rows.fetchall()]
     return {"schedules": schedules}
+
+
+@app.get("/api/schedules/download/{upload_id}")
+async def download_schedule_pdf(
+    upload_id: str,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    db=Depends(get_db)
+):
+    """Permite fazer o download do PDF original da escala a partir do ID do upload."""
+    # 1. Resolver token (Header ou Query)
+    resolved_token = None
+    if authorization and authorization.startswith("Bearer "):
+        resolved_token = authorization.split(" ")[1]
+    elif token:
+        resolved_token = token
+        
+    if not resolved_token:
+        raise HTTPException(status_code=401, detail="Token de autenticação não fornecido.")
+        
+    # 2. Validar o token e obter usuário
+    try:
+        payload = jwt.decode(resolved_token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=401, detail="Token inválido")
+        row = await db.execute("SELECT * FROM users WHERE email = ?", (email,))
+        user = await row.fetchone()
+        if not user or user["role"] not in ("admin", "worker"):
+            raise HTTPException(status_code=401, detail="Acesso negado")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
+
+    # 3. Servir o arquivo
+    PDFS_DIR = os.getenv("PDFS_DIR", "/data/pdfs")
+    pdf_path = os.path.join(PDFS_DIR, f"{upload_id}.pdf")
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="Arquivo PDF original não encontrado no servidor.")
+    
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"escala_{upload_id[:8]}.pdf"
+    )
 
 
 # ─── Importação Histórica de E-mails ──────────────────────────────────────────
@@ -859,7 +911,7 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
                 result.append(str(p))
         return "".join(result)
 
-    def _save_shifts(shifts, filename, conn_sync):
+    def _save_shifts(shifts, filename, conn_sync, pdf_bytes=None):
         if not shifts:
             return 0
         type_map = {"morning": "M", "afternoon": "P", "night": "N", "dayoff": "R"}
@@ -895,11 +947,18 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
             except Exception:
                 pass
         # Registrar upload
+        upload_id = str(_uuid.uuid4())
         try:
             cur.execute("""
                 INSERT INTO uploads (id, filename, uploaded_by, uploaded_at, status, shifts_count)
                 VALUES (?, ?, ?, ?, 'ok', ?)
-            """, (str(_uuid.uuid4()), f"Histórico - {filename}", "historico@email.auto", uploaded_at, inserted))
+            """, (upload_id, f"Histórico - {filename}", "historico@email.auto", uploaded_at, inserted))
+            
+            if pdf_bytes:
+                PDFS_DIR = os.getenv("PDFS_DIR", "/data/pdfs")
+                os.makedirs(PDFS_DIR, exist_ok=True)
+                with open(os.path.join(PDFS_DIR, f"{upload_id}.pdf"), "wb") as f:
+                    f.write(pdf_bytes)
         except Exception:
             pass
         conn_sync.commit()
@@ -945,7 +1004,7 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
                         total_pdfs += 1
                         try:
                             shifts = parser.parse_from_bytes(pdf_bytes)
-                            novos = _save_shifts(shifts, fn or f"email_hist.pdf", conn_sync)
+                            novos = _save_shifts(shifts, fn or f"email_hist.pdf", conn_sync, pdf_bytes)
                             total_novos += novos
                         except Exception:
                             pass

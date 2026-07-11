@@ -568,7 +568,23 @@ export default function DashboardPage() {
                   <h2 className={styles.sectionTitle}>{t.activityTitle}</h2>
                   <div className={styles.activityList}>
                     {history.map((item, i) => (
-                      <div key={i} className={styles.activityItem}>
+                      <div 
+                        key={i} 
+                        className={styles.activityItem}
+                        onClick={() => {
+                          if (item.id) {
+                            const token = getToken();
+                            // Como o download exige autenticação Bearer no header, ou podemos passar token na query, ou abrir direto se for no mesmo domínio
+                            // Para permitir autenticação fácil, podemos passar o token como parâmetro de query: ?token=...
+                            // Vamos ajustar a rota no backend para aceitar token via query param se necessário, ou usar a sessão se for cookie (mas usamos localstorage)
+                            // Ah! Como o token está no localStorage, não vai nos headers se abrirmos direto com window.open!
+                            // Se passarmos na query param, podemos validar no backend!
+                            window.open(`/api/schedules/download/${item.id}?token=${token}`, "_blank");
+                          }
+                        }}
+                        style={{ cursor: item.id ? "pointer" : "default" }}
+                        title={item.id ? (lang === "pt" ? "Clique para baixar/visualizar PDF" : "Clicca per scaricare/visualizzare il PDF") : ""}
+                      >
                         <div className={styles.activityIcon}>
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>

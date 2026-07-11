@@ -215,10 +215,21 @@ class ToolExecutor:
                 """, (shift_id, s["worker_name"], s["date"], s["start_time"], s["end_time"], stype, s["duration_hours"], s["notes"], "email_agent@saashpm.com", uploaded_at))
                 inserted_count += 1
                 
+            # Obter os bytes do PDF se disponíveis
+            pdf_bytes = None
+            if pdf_index < len(self._email_attachments):
+                pdf_bytes = self._email_attachments[pdf_index].get("content")
+
             cursor.execute("""
                 INSERT INTO uploads (id, filename, uploaded_by, uploaded_at, status, shifts_count)
                 VALUES (?, ?, ?, ?, 'ok', ?)
             """, (upload_id, f"E-mail Anexo - {month} {year}.pdf", "email_agent@saashpm.com", uploaded_at, inserted_count))
+            
+            if pdf_bytes:
+                PDFS_DIR = os.getenv("PDFS_DIR", "/data/pdfs")
+                os.makedirs(PDFS_DIR, exist_ok=True)
+                with open(os.path.join(PDFS_DIR, f"{upload_id}.pdf"), "wb") as f:
+                    f.write(pdf_bytes)
             
             conn.commit()
             return {
