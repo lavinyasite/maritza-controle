@@ -497,6 +497,7 @@ async def get_my_analytics(
     year_prefix = f"{year}%"
     
     # 1. Total de turnos e horas
+    # 1. Total de turnos e horas
     row_stats = await db.execute("""
         SELECT COUNT(*) as total_shifts, SUM(duration_hours) as total_hours 
         FROM shifts 
@@ -504,21 +505,51 @@ async def get_my_analytics(
     """, (name_query, year_prefix))
     stats = dict(await row_stats.fetchone())
     
-    # 2. Total de folgas (registradas ou implícitas)
-    row_off = await db.execute("""
-        SELECT COUNT(*) as total_off 
-        FROM shifts 
-        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
-    """, (name_query, year_prefix))
-    total_off = (await row_off.fetchone())[0]
-
-    # 3. Dia da semana mais trabalhado
+    # 2. Obter todas as datas trabalhadas no ano
     row_days = await db.execute("""
         SELECT date FROM shifts 
         WHERE worker_name LIKE ? AND date LIKE ? AND shift_type != 'dayoff' AND shift_type != 'R'
     """, (name_query, year_prefix))
-    dates = [datetime.strptime(r[0], "%Y-%m-%d") for r in await row_days.fetchall() if r[0]]
+    dates = []
+    for r in await row_days.fetchall():
+        if r[0]:
+            try:
+                dates.append(datetime.strptime(r[0], "%Y-%m-%d"))
+            except:
+                pass
+                
+    dates = sorted(dates)
     
+    # 3. Calcular folgas implícitas no intervalo ativo
+    off_dates = []
+    total_off = 0
+    weekend_worked = 0
+    weekend_off = 0
+    
+    if dates:
+        first_date = dates[0].date()
+        last_date = dates[-1].date()
+        
+        # Gerar todas as datas do primeiro ao último turno do ano
+        all_dates = []
+        curr = first_date
+        while curr <= last_date:
+            all_dates.append(curr)
+            curr += timedelta(days=1)
+            
+        worked_dates_set = {d.date() for d in dates}
+        off_dates = [d for d in all_dates if d not in worked_dates_set]
+        total_off = len(off_dates)
+        
+        # Calcular fins de semana trabalhados / folgados
+        for d in all_dates:
+            if d.weekday() in (5, 6): # 5=Sáb, 6=Dom
+                if d in worked_dates_set:
+                    weekend_worked += 1
+                else:
+                    weekend_off += 1
+                    
+    # 4. Dia da semana mais trabalhado
     weekday_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0} # 0=Seg, 6=Dom
     for d in dates:
         weekday_counts[d.weekday()] += 1
@@ -528,33 +559,8 @@ async def get_my_analytics(
     
     max_day_idx = max(weekday_counts, key=weekday_counts.get) if dates else 0
     max_day_count = weekday_counts[max_day_idx]
-    
-    # 4. Finais de semana (Sábado + Domingo)
-    weekend_worked = 0
-    weekend_off = 0
-    row_weekends = await db.execute("""
-        SELECT date, shift_type FROM shifts 
-        WHERE worker_name LIKE ? AND date LIKE ?
-    """, (name_query, year_prefix))
-    for r in await row_weekends.fetchall():
-        try:
-            dt = datetime.strptime(r[0], "%Y-%m-%d")
-            if dt.weekday() in (5, 6): # 5=Sáb, 6=Dom
-                if r[1] in ('dayoff', 'R'):
-                    weekend_off += 1
-                else:
-                    weekend_worked += 1
-        except:
-            pass
 
     # 5. Detecção de Férias/Folgas Prolongadas (sequências de 4+ dias de folga seguidos)
-    row_all_off = await db.execute("""
-        SELECT date FROM shifts 
-        WHERE worker_name LIKE ? AND date LIKE ? AND (shift_type = 'dayoff' OR shift_type = 'R')
-        ORDER BY date ASC
-    """, (name_query, year_prefix))
-    off_dates = sorted([datetime.strptime(r[0], "%Y-%m-%d").date() for r in await row_all_off.fetchall() if r[0]])
-    
     vacations = []
     if off_dates:
         current_streak = [off_dates[0]]
