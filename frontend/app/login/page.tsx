@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./login.module.css";
 
@@ -39,11 +39,23 @@ const TRANSLATIONS = {
   },
 };
 
-export default function LoginPage() {
+// ─── Componente interno (usa useSearchParams — deve estar dentro de Suspense) ───
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const lang = (searchParams.get("lang") || localStorage?.getItem?.("cs_lang") || "pt") as "pt" | "it";
-  const t = TRANSLATIONS[lang] || TRANSLATIONS.pt;
+
+  const getLang = (): "pt" | "it" => {
+    const p = searchParams.get("lang");
+    if (p === "pt" || p === "it") return p;
+    if (typeof window !== "undefined") {
+      const s = localStorage.getItem("cs_lang");
+      if (s === "pt" || s === "it") return s;
+    }
+    return "pt";
+  };
+
+  const lang = getLang();
+  const t = TRANSLATIONS[lang];
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -90,7 +102,6 @@ export default function LoginPage() {
     <main className={styles.container}>
       <div className={styles.bgOrb} />
 
-      {/* Botão voltar ao idioma */}
       <button
         id="btn-back-lang"
         className={styles.backBtn}
@@ -103,7 +114,6 @@ export default function LoginPage() {
       </button>
 
       <div className={styles.card}>
-        {/* Header */}
         <div className={styles.header}>
           <div className={styles.iconWrap}>
             <svg viewBox="0 0 40 40" fill="none">
@@ -116,7 +126,6 @@ export default function LoginPage() {
           <p className={styles.subtitle}>{t.subtitle}</p>
         </div>
 
-        {/* Formulário */}
         <form onSubmit={handleSubmit} className={styles.form} noValidate>
           <div className={styles.field}>
             <label htmlFor="email" className="input-label">{t.email}</label>
@@ -180,7 +189,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Erro */}
           {error && (
             <div className={styles.errorMsg} role="alert">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -209,28 +217,32 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Links */}
         <div className={styles.links}>
-          <button
-            id="btn-forgot-password"
-            className="btn btn-ghost btn-sm"
-            type="button"
-          >
+          <button id="btn-forgot-password" className="btn btn-ghost btn-sm" type="button">
             {t.forgotPassword}
           </button>
           <div className={styles.divider} />
           <p className={styles.registerText}>
             {t.noAccount}{" "}
-            <button
-              id="btn-request-access"
-              className={styles.registerLink}
-              type="button"
-            >
+            <button id="btn-request-access" className={styles.registerLink} type="button">
               {t.register}
             </button>
           </p>
         </div>
       </div>
     </main>
+  );
+}
+
+// ─── Export com Suspense obrigatório para useSearchParams ─────────────────────
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "#e94560", fontSize: "1.5rem" }}>⏳</div>
+      </main>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
