@@ -720,7 +720,7 @@ async def get_stats(
     # 3. Próximo turno (a partir de hoje)
     today_str = now.date().isoformat()
     row_next = await db.execute("""
-        SELECT start_time, date, shift_type FROM shifts 
+        SELECT start_time, end_time, date, shift_type FROM shifts 
         WHERE worker_name LIKE ? AND date >= ? AND shift_type != 'dayoff' AND shift_type != 'R'
         ORDER BY date ASC, start_time ASC LIMIT 1
     """, (name_query, today_str))
@@ -732,9 +732,15 @@ async def get_stats(
             date_dt = datetime.strptime(next_shift["date"], "%Y-%m-%d")
             date_fmt = date_dt.strftime("%d/%m")
             stype = next_shift["shift_type"]
-            time_part = next_shift["start_time"]
-            if time_part:
-                next_str = f"{stype} - {time_part} ({date_fmt})"
+            start = next_shift["start_time"]
+            end = next_shift["end_time"]
+            
+            if start and end:
+                next_str = f"{stype} - {start} às {end} ({date_fmt})"
+            elif start:
+                next_str = f"{stype} - {start} ({date_fmt})"
+            elif end:
+                next_str = f"{stype} - até {end} ({date_fmt})"
             else:
                 next_str = f"{stype} ({date_fmt})"
         except Exception:

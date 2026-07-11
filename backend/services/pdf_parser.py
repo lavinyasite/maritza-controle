@@ -113,11 +113,26 @@ class PDFParser:
             if not work_date:
                 continue
 
-            start_time = self._clean_time(cells[i] if i < len(cells) else None)
-            end_time = self._clean_time(cells[i+3] if i+3 < len(cells) else None)
-
-            if not start_time and not end_time:
+            # Coleta todas as horas válidas nos 4 campos do dia
+            day_times = []
+            for offset in range(4):
+                idx = i + offset
+                if idx < len(cells):
+                    t = self._clean_time(cells[idx])
+                    if t:
+                        day_times.append(t)
+                        
+            if not day_times:
                 continue  # Dia de folga
+                
+            if len(day_times) == 1:
+                # Se só tem 1 horário, assume que é a entrada (ou o horário único do turno)
+                start_time = day_times[0]
+                end_time = None
+            else:
+                # Se tem 2 ou mais, o primeiro é a entrada e o último é a saída
+                start_time = day_times[0]
+                end_time = day_times[-1]
 
             note = ""
             if notes and i < len(notes):
