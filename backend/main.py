@@ -872,7 +872,11 @@ async def import_email_history(admin=Depends(require_admin), db=Depends(get_db))
                     INSERT INTO shifts (id, worker_name, date, start_time, end_time,
                                         shift_type, duration_hours, notes, uploaded_by, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(worker_name, date) DO NOTHING
+                    ON CONFLICT(worker_name, date) DO UPDATE SET
+                        start_time=excluded.start_time,
+                        end_time=excluded.end_time,
+                        duration_hours=excluded.duration_hours,
+                        shift_type=excluded.shift_type
                 """, (
                     str(_uuid.uuid4()),
                     s.get("worker_name", ""),
