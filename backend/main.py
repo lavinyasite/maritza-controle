@@ -18,6 +18,7 @@ import uuid
 import os
 import logging
 from dotenv import load_dotenv
+from typing import List, Optional
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -1318,5 +1319,182 @@ async def get_worker_analytics(
         },
         "vacations": vacations,
         "vacations_count": len(vacations)
+    }
+
+
+# ─── Assistente de IA Conversacional do Admin ───────────────────────────────
+
+class AIChatMessage(BaseModel):
+    role: str # "user", "assistant" ou "system"
+    content: str
+
+class AIChatRequest(BaseModel):
+    message: str
+    history: List[AIChatMessage] = []
+
+class AIProposedAction(BaseModel):
+    type: str # "UPSERT_SHIFT" ou "DELETE_SHIFT"
+    worker_name: str
+    date: str # "YYYY-MM-DD"
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    shift_type: Optional[str] = None
+    duration_hours: Optional[float] = None
+    notes: Optional[str] = None
+
+class AIApplyRequest(BaseModel):
+    actions: List[AIProposedAction]
+
+
+@app.post("/api/admin/ai-assistant/chat")
+async def admin_ai_chat(
+    body: AIChatRequest,
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    """
+    Processa a mensagem do administrador.
+    Carrega o contexto atual de escalas do banco de dados (últimos 60 dias)
+    e envia à OpenAI para sugestões e geração de propostas estruturadas de alteração.
+    """
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="Chave OPENAI_API_KEY não configurada no servidor.")
+        
+    # 1. Carregar contexto real do banco
+    rows_workers = await db.execute("SELECT DISTINCT worker_name FROM shifts ORDER BY worker_name ASC")
+    workers = [r[0] for r in await rows_workers.fetchall() if r[0]]
+    
+    # Pegar escalas dos últimos 60 dias para limitar tamanho do prompt
+    date_limit = (datetime.utcnow() - timedelta(days=60)).strftime("%Y-%m-%d")
+    rows_recent = await db.execute("""
+        SELECT worker_name, date, start_time, end_time, shift_type, duration_hours 
+        FROM shifts 
+        WHERE date >= ? AND shift_type != 'dayoff' AND shift_type != 'R'
+        ORDER BY date ASC
+    """, (date_limit,))
+    recent_shifts = [dict(r) for r in await rows_recent.fetchall()]
+    
+    context_str = f"Trabalhadores ativos: {', '.join(workers)}\n\n"
+    context_str += f"Escalas registradas (últimos 60 dias a partir de {date_limit}):\n"
+    for s in recent_shifts:
+         context_str += f"- {s['worker_name']} em {s['date']}: {s['shift_type']} ({s['start_time']} às {s['end_time']}) - {s['duration_hours']}h\n"
+         
+    # 2. Construir prompt do sistema com orientações estritas
+    system_prompt = f"""Você é o Assistente de IA Inteligente do Controle de Serviço (Controllo Servizi).
+Seu papel é auxiliar o administrador a gerenciar a escala, dar orientações estratégicas, simular férias/compensação de horas ou sugerir trocas.
+
+Regras Fundamentais (NUNCA QUEBRAR):
+1. Use APENAS os trabalhadores ativos listados no contexto. Não invente nomes.
+2. Não invente turnos do nada. Sempre baseie suas propostas nos dados reais do contexto.
+3. Se o administrador solicitar uma alteração ou compensação automática, analise os dados e apresente suas propostas estruturadas no final da sua mensagem em formato JSON de array de ações dentro de um bloco de código markdown com a tag ```json.
+4. As ações aceitas são:
+   - {{"type": "UPSERT_SHIFT", "worker_name": "Nome", "date": "YYYY-MM-DD", "start_time": "HH:MM", "end_time": "HH:MM", "shift_type": "M/P/N/R", "duration_hours": horas, "notes": "motivo/detalhes"}}
+   - {{"type": "DELETE_SHIFT", "worker_name": "Nome", "date": "YYYY-MM-DD"}}
+5. Ao propor novos turnos de trabalho (M, P ou N), use durações e horários compatíveis com os turnos existentes:
+   - M (Manhã): das 06:00 às 14:00 (8h) ou similar do contexto.
+   - P (Tarde): das 14:00 às 22:00 (8h) ou similar do contexto.
+   - N (Noite): das 22:00 às 06:00 (8h) ou 21:30 às 08:30 (11h) ou similar do contexto.
+6. Ações propostas por você NUNCA serão aplicadas de imediato; elas serão mostradas ao administrador na tela para aprovação prévia. Explique para ele o que propôs.
+
+Contexto Real do Banco de Dados:
+{context_str}
+"""
+    
+    # 3. Preparar histórico de mensagens
+    from openai import OpenAI
+    client_ai = OpenAI(api_key=OPENAI_API_KEY)
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in body.history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": body.message})
+    
+    # 4. Chamar LLM
+    try:
+        response = client_ai.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.2
+        )
+        ai_response = response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Erro ao chamar OpenAI no chat admin: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao chamar assistente de IA: {str(e)}")
+        
+    # 5. Extrair e validar ações do JSON de resposta da IA
+    import re
+    import json
+    proposed_actions = []
+    
+    match = re.search(r"```json\s*(\[\s*\{.*?\}\s*\])\s*```", ai_response, re.DOTALL)
+    if match:
+        try:
+            proposed_actions = json.loads(match.group(1))
+            # Remover o bloco de código JSON da resposta legível pelo usuário para manter o chat limpo
+            ai_response = re.sub(r"```json\s*\[\s*\{.*?\}\s*\]\s*```", "", ai_response, flags=re.DOTALL).strip()
+        except Exception as e:
+            logger.error(f"Erro ao parsear ações sugeridas pela IA: {e}")
+            
+    return {
+        "text": ai_response,
+        "proposed_actions": proposed_actions
+    }
+
+
+@app.post("/api/admin/ai-assistant/apply")
+async def admin_ai_apply_actions(
+    body: AIApplyRequest,
+    admin=Depends(require_admin),
+    db=Depends(get_db)
+):
+    """
+    Executa em lote/transação as ações de alteração propostas pela IA
+    que foram explicitamente aprovadas pelo administrador.
+    """
+    check_admin_write_permission(admin)
+    
+    applied_count = 0
+    deleted_count = 0
+    
+    # Executar as ações sequencialmente
+    for action in body.actions:
+        if action.type == "UPSERT_SHIFT":
+            if not action.worker_name or not action.date or not action.shift_type:
+                continue
+                
+            # Buscar ID de turno existente se houver para sobrescrever na mesma data/trabalhador
+            shift_id = str(uuid.uuid4())
+            await db.execute("""
+                INSERT OR REPLACE INTO shifts (id, worker_name, date, start_time, end_time, shift_type, duration_hours, notes, uploaded_by, created_at)
+                VALUES (
+                    COALESCE((SELECT id FROM shifts WHERE worker_name = ? AND date = ?), ?),
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+            """, (
+                action.worker_name, action.date, shift_id,
+                action.worker_name, action.date, action.start_time, action.end_time,
+                action.shift_type, action.duration_hours or 8.0, action.notes or "Atualizado via Assistente IA",
+                admin["email"], datetime.utcnow().isoformat()
+            ))
+            applied_count += 1
+            
+        elif action.type == "DELETE_SHIFT":
+            if not action.worker_name or not action.date:
+                continue
+            await db.execute("""
+                DELETE FROM shifts WHERE worker_name = ? AND date = ?
+            """, (action.worker_name, action.date))
+            deleted_count += 1
+            
+    await db.commit()
+    logger.info(f"🤖 IA Aplicou Alterações: {applied_count} inseridas/atualizadas, {deleted_count} removidas. Por admin: {admin['email']}")
+    return {
+        "success": True,
+        "message": f"Alterações aplicadas com sucesso: {applied_count} turnos alterados, {deleted_count} removidos.",
+        "applied": applied_count,
+        "deleted": deleted_count
     }
 

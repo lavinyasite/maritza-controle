@@ -8,7 +8,7 @@ const T = {
   pt: {
     title: "Painel Admin",
     subtitle: "Gestão & Analítico 360",
-    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário", email: "Robô de E-mail", analytics360: "Painel 360" },
+    tabs: { pending: "Pendentes", all: "Todos", create: "Criar Usuário", email: "Robô de E-mail", analytics360: "Painel 360", ai_chat: "🚀 Assistente IA" },
     name: "Nome", email: "E-mail", lang: "Idioma", role: "Função",
     password: "Senha", confirm: "Confirmar Senha",
     approve: "Aprovar", block: "Bloquear", remove: "Remover",
@@ -67,11 +67,22 @@ const T = {
     vacationDays: "dias",
     creatorBadge: "CRIADOR DO PROJETO",
     adminPowerLabel: "Nível de Permissão",
+    aiTitle: "Assistente Inteligente de IA",
+    aiDesc: "Peça orientações, calcule recomposição de escalas ou simule alterações. A IA propõe ações que você revisa e decide se quer aplicar no banco de dados.",
+    aiInputHolder: "Escreva sua mensagem ou escolha um preset abaixo...",
+    aiSendBtn: "Enviar",
+    aiPreset1: "⚖️ Equilibrar carga horária de todos",
+    aiPreset2: "🌴 Calcular recomposição de férias/folgas",
+    aiPreset3: "📅 Simular folgas extras semanais",
+    aiProposedChanges: "Ações Sugeridas pela IA (Aprovação Pendente)",
+    aiApplyProposed: "Aprovar e Aplicar no Banco de Dados",
+    aiApplySuccess: "Alterações aplicadas com sucesso!",
+    readOnlyWarning: "Você está em modo Apenas Leitura. Não pode aplicar propostas de alteração.",
   },
   it: {
     title: "Pannello Admin",
     subtitle: "Gestione & Analitica 360",
-    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente", email: "Bot Email", analytics360: "Pannello 360" },
+    tabs: { pending: "In Attesa", all: "Tutti", create: "Crea Utente", email: "Bot Email", analytics360: "Pannello 360", ai_chat: "🚀 Assistente IA" },
     name: "Nome", email: "Email", lang: "Lingua", role: "Ruolo",
     password: "Password", confirm: "Conferma Password",
     approve: "Approva", block: "Blocca", remove: "Rimuovi",
@@ -130,6 +141,17 @@ const T = {
     vacationDays: "giorni",
     creatorBadge: "CREATORE PROGETTO",
     adminPowerLabel: "Livello Permessi",
+    aiTitle: "Assistente IA Intelligente",
+    aiDesc: "Chiedi linee guida, calcola la compensazione dei turni o simula variazioni. L'IA propone azioni che potrai rivedere e approvare prima di scriverle nel database.",
+    aiInputHolder: "Scrivi un messaggio o scegli un preset qui sotto...",
+    aiSendBtn: "Invia",
+    aiPreset1: "⚖️ Bilanciare le ore di lavoro di tutti",
+    aiPreset2: "🌴 Calcola compensazione ferie/riposi",
+    aiPreset3: "📅 Simula riposi extra settimanali",
+    aiProposedChanges: "Azioni Proposte dall'IA (Approvazione in Sospeso)",
+    aiApplyProposed: "Approva e Applica nel Database",
+    aiApplySuccess: "Modifiche applicate con successo!",
+    readOnlyWarning: "Sei in modalità Solo Lettura. Non puoi applicare proposte di modifica.",
   },
 };
 
@@ -149,7 +171,7 @@ function roleBadge(role: string) {
 export default function AdminPage() {
   const router = useRouter();
   const [lang, setLang] = useState<"pt" | "it">("pt");
-  const [tab, setTab] = useState<"pending" | "all" | "create" | "email" | "analytics360">("pending");
+  const [tab, setTab] = useState<"pending" | "all" | "create" | "email" | "analytics360" | "ai_chat">("pending");
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
@@ -177,6 +199,83 @@ export default function AdminPage() {
   const [comparativeStats, setComparativeStats] = useState<any>(null);
   const [workerAnalytics, setWorkerAnalytics] = useState<any>(null);
   const [loading360, setLoading360] = useState(false);
+
+  // States para Assistente de IA
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [proposedActions, setProposedActions] = useState<any[]>([]);
+  const [applyLoading, setApplyLoading] = useState(false);
+
+  async function handleSendAiMessage(messageText?: string) {
+    const textToSend = messageText || chatInput;
+    if (!textToSend.trim() || aiLoading) return;
+    
+    setProposedActions([]);
+    
+    const userMsg = { role: "user", content: textToSend };
+    const updatedMessages = [...chatMessages, userMsg];
+    setChatMessages(updatedMessages);
+    if (!messageText) setChatInput("");
+    setAiLoading(true);
+    
+    try {
+      const res = await fetch("/api/admin/ai-assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({
+          message: textToSend,
+          history: chatMessages.map(m => ({ role: m.role, content: m.content }))
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setChatMessages(prev => [...prev, { role: "assistant", content: data.text }]);
+        if (data.proposed_actions && data.proposed_actions.length > 0) {
+          setProposedActions(data.proposed_actions);
+        }
+      } else {
+        const d = await res.json();
+        showToast(d.detail || t.error);
+      }
+    } catch {
+      showToast(t.error);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleApplyProposedActions() {
+    if (proposedActions.length === 0 || applyLoading) return;
+    if (currentUser?.admin_permissions === "read_only") {
+      showToast(t.readOnlyWarning);
+      return;
+    }
+    
+    setApplyLoading(true);
+    try {
+      const res = await fetch("/api/admin/ai-assistant/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ actions: proposedActions })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        showToast(lang === "pt" ? data.message : "Modifiche applicate con successo!");
+        setProposedActions([]);
+        fetch360Data();
+      } else {
+        const d = await res.json();
+        showToast(d.detail || t.error);
+      }
+    } catch {
+      showToast(t.error);
+    } finally {
+      setApplyLoading(false);
+    }
+  }
 
   const t = T[lang];
 
@@ -447,7 +546,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className={styles.tabs}>
-          {(["pending", "all", "create", "email", "analytics360"] as const).map(tb => (
+          {(["pending", "all", "create", "email", "analytics360", "ai_chat"] as const).map(tb => (
             <button
               key={tb}
               className={`${styles.tab} ${tab === tb ? styles.tabActive : ""}`}
@@ -968,6 +1067,194 @@ export default function AdminPage() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {/* Aba Chat de IA */}
+        {tab === "ai_chat" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 40 }}>
+            {/* Cabeçalho do Chat */}
+            <div style={{
+              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 16, padding: 18
+            }}>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0, color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
+                🚀 {t.aiTitle}
+              </h2>
+              <p style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.45)", margin: "6px 0 0", lineHeight: 1.4 }}>
+                {t.aiDesc}
+              </p>
+            </div>
+
+            {/* Mensagens de Chat */}
+            <div style={{
+              background: "rgba(255,255,255,0.01)", border: "1px solid rgba(255,255,255,0.05)",
+              borderRadius: 16, padding: 16, minHeight: 250, maxHeight: 400, overflowY: "auto",
+              display: "flex", flexDirection: "column", gap: 12
+            }}>
+              {chatMessages.length === 0 ? (
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", height: "100%", minHeight: 200,
+                  color: "rgba(255,255,255,0.3)", fontSize: "0.82rem", textAlign: "center", padding: 20
+                }}>
+                  🤖 Olá! Como posso ajudar com as escalas hoje?<br/>Selecione um preset abaixo ou escreva sua dúvida.
+                </div>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "10px 14px", borderRadius: 12, maxWidth: "80%", fontSize: "0.82rem",
+                      lineHeight: 1.4, wordBreak: "break-word",
+                      alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                      background: msg.role === "user" ? "rgba(167, 139, 250, 0.1)" : "rgba(255, 255, 255, 0.03)",
+                      border: msg.role === "user" ? "1px solid rgba(167, 139, 250, 0.2)" : "1px solid rgba(255,255,255,0.06)",
+                      color: msg.role === "user" ? "#fff" : "rgba(255,255,255,0.85)"
+                    }}
+                  >
+                    <div style={{ fontSize: "0.68rem", fontWeight: 700, color: msg.role === "user" ? "#a78bfa" : "#8b5cf6", marginBottom: 3 }}>
+                      {msg.role === "user" ? "ADMIN" : "ASSISTENTE IA"}
+                    </div>
+                    <div style={{ whiteSpace: "pre-line" }}>{msg.content}</div>
+                  </div>
+                ))
+              )}
+              {aiLoading && (
+                <div style={{
+                  padding: "10px 14px", borderRadius: 12, alignSelf: "flex-start",
+                  background: "rgba(255, 255, 255, 0.02)", border: "1px solid rgba(255,255,255,0.05)",
+                  fontSize: "0.8rem", color: "rgba(255,255,255,0.4)"
+                }}>
+                  ⏳ IA analisando dados em tempo real...
+                </div>
+              )}
+            </div>
+
+            {/* Presets / Ações Rápidas */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={() => handleSendAiMessage(lang === "pt" ? "Equilibrar a carga horária e turnos de todos os funcionários de forma justa" : "Bilancia i turni e le ore di lavoro di tutti i dipendenti")}
+                disabled={aiLoading}
+                style={{
+                  background: "rgba(255,255,255,0.02)", color: "#fff", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 10, padding: "8px 12px", fontSize: "0.75rem", cursor: "pointer", transition: "all 0.2s"
+                }}
+              >
+                {t.aiPreset1}
+              </button>
+              <button
+                onClick={() => handleSendAiMessage(lang === "pt" ? "Preciso calcular a recomposição de horários para a Maritza após sua saída de férias" : "Calcola la ricomposizione dei turni per Maritza dopo le sue ferie")}
+                disabled={aiLoading}
+                style={{
+                  background: "rgba(255,255,255,0.02)", color: "#fff", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 10, padding: "8px 12px", fontSize: "0.75rem", cursor: "pointer", transition: "all 0.2s"
+                }}
+              >
+                {t.aiPreset2}
+              </button>
+              <button
+                onClick={() => handleSendAiMessage(lang === "pt" ? "Sugira simulações de folgas semanais extras para quem está trabalhando mais" : "Suggerisci riposi extra settimanali per chi lavora di più")}
+                disabled={aiLoading}
+                style={{
+                  background: "rgba(255,255,255,0.02)", color: "#fff", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 10, padding: "8px 12px", fontSize: "0.75rem", cursor: "pointer", transition: "all 0.2s"
+                }}
+              >
+                {t.aiPreset3}
+              </button>
+            </div>
+
+            {/* Input de Texto */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <input
+                className={styles.input}
+                style={{ flex: 1, margin: 0 }}
+                placeholder={t.aiInputHolder}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendAiMessage()}
+                disabled={aiLoading}
+              />
+              <button
+                onClick={() => handleSendAiMessage()}
+                disabled={aiLoading || !chatInput.trim()}
+                style={{
+                  padding: "0 20px", borderRadius: 10, border: "none",
+                  background: "linear-gradient(135deg, #a78bfa, #6366f1)",
+                  color: "#fff", fontWeight: 700, cursor: "pointer",
+                  opacity: aiLoading || !chatInput.trim() ? 0.5 : 1
+                }}
+              >
+                {t.aiSendBtn}
+              </button>
+            </div>
+
+            {/* ─── Box de Proposta de Ações ─── */}
+            {proposedActions.length > 0 && (
+              <div style={{
+                background: "rgba(167, 139, 250, 0.05)", border: "1px solid rgba(167, 139, 250, 0.25)",
+                borderRadius: 16, padding: 18, marginTop: 10
+              }}>
+                <h3 style={{ fontSize: "0.9rem", fontWeight: 700, margin: "0 0 12px", color: "#fff" }}>
+                  📋 {t.aiProposedChanges}
+                </h3>
+                
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                  {proposedActions.map((act, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: "8px 12px",
+                        border: "1px solid rgba(255,255,255,0.06)", fontSize: "0.78rem"
+                      }}
+                    >
+                      <div>
+                        <span style={{
+                          background: act.type === "UPSERT_SHIFT" ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)",
+                          color: act.type === "UPSERT_SHIFT" ? "#34d399" : "#f87171",
+                          borderRadius: 6, padding: "2px 6px", fontSize: 10, fontWeight: 700, marginRight: 8
+                        }}>
+                          {act.type === "UPSERT_SHIFT" ? "+" : "-"}
+                        </span>
+                        <strong style={{ color: "#fff" }}>{act.worker_name}</strong>
+                        <span style={{ color: "rgba(255,255,255,0.5)", margin: "0 6px" }}>•</span>
+                        <span>{new Date(act.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+                        {act.type === "UPSERT_SHIFT" && (
+                          <span style={{ color: "#a78bfa", marginLeft: 8, fontWeight: 600 }}>
+                            {act.shift_type} ({act.start_time} - {act.end_time})
+                          </span>
+                        )}
+                      </div>
+                      {act.notes && (
+                        <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.4)" }}>
+                          {act.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {currentUser?.admin_permissions === "read_only" ? (
+                  <div style={{ color: "#f87171", fontSize: "0.78rem", fontWeight: 700 }}>
+                    ⚠️ {t.readOnlyWarning}
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleApplyProposedActions}
+                    disabled={applyLoading}
+                    style={{
+                      width: "100%", padding: "13px 0", borderRadius: 12, border: "none",
+                      background: "linear-gradient(135deg, #34d399, #10b981)",
+                      color: "#fff", fontWeight: 700, fontSize: "0.85rem", cursor: "pointer",
+                      boxShadow: "0 4px 12px rgba(16,185,129,0.2)", transition: "all 0.2s"
+                    }}
+                  >
+                    {applyLoading ? "⏳..." : `✅ ${t.aiApplyProposed}`}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
