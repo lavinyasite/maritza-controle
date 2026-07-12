@@ -207,6 +207,88 @@ export default function AdminPage() {
   const [proposedActions, setProposedActions] = useState<any[]>([]);
   const [applyLoading, setApplyLoading] = useState(false);
 
+  // States para Recursos de Voz (Microfone e Sintetizador)
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recognitionInstance, setRecognitionInstance] = useState<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedVoice = localStorage.getItem("cs_voice_enabled");
+      if (savedVoice === "true") setIsVoiceEnabled(true);
+
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const rec = new SpeechRecognition();
+        rec.continuous = false;
+        rec.interimResults = false;
+        
+        rec.onstart = () => {
+          setIsRecording(true);
+        };
+        
+        rec.onend = () => {
+          setIsRecording(false);
+        };
+        
+        rec.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          if (transcript) {
+            setChatInput(transcript);
+          }
+        };
+        
+        rec.onerror = (e: any) => {
+          console.error("Speech recognition error:", e);
+          setIsRecording(false);
+        };
+        
+        setRecognitionInstance(rec);
+      }
+    }
+  }, []);
+
+  function toggleRecording() {
+    if (!recognitionInstance) {
+      showToast(lang === "pt" ? "Reconhecimento de voz não suportado neste navegador." : "Riconoscimento vocale non supportato in questo browser.");
+      return;
+    }
+    
+    if (isRecording) {
+      recognitionInstance.stop();
+    } else {
+      recognitionInstance.lang = lang === "pt" ? "pt-BR" : "it-IT";
+      recognitionInstance.start();
+    }
+  }
+
+  function toggleVoiceFeedback() {
+    const nextVal = !isVoiceEnabled;
+    setIsVoiceEnabled(nextVal);
+    localStorage.setItem("cs_voice_enabled", String(nextVal));
+    if (!nextVal && typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  function speakText(text: string) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    const isIt = /\b(il|la|i|le|per|con|di|da|in|su|con|si|no|lavoratore|dipendente|turni|riposo)\b/i.test(text);
+    utterance.lang = isIt ? "it-IT" : "pt-BR";
+    
+    const voices = window.speechSynthesis.getVoices();
+    const matchingVoice = voices.find(v => v.lang.startsWith(isIt ? "it" : "pt"));
+    if (matchingVoice) {
+      utterance.voice = matchingVoice;
+    }
+    
+    window.speechSynthesis.speak(utterance);
+  }
+
   async function handleSendAiMessage(messageText?: string) {
     const textToSend = messageText || chatInput;
     if (!textToSend.trim() || aiLoading) return;
@@ -218,6 +300,10 @@ export default function AdminPage() {
     setChatMessages(updatedMessages);
     if (!messageText) setChatInput("");
     setAiLoading(true);
+    
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     
     try {
       const res = await fetch("/api/admin/ai-assistant/chat", {
@@ -234,6 +320,9 @@ export default function AdminPage() {
         setChatMessages(prev => [...prev, { role: "assistant", content: data.text }]);
         if (data.proposed_actions && data.proposed_actions.length > 0) {
           setProposedActions(data.proposed_actions);
+        }
+        if (isVoiceEnabled) {
+          speakText(data.text);
         }
       } else {
         const d = await res.json();
@@ -1165,17 +1254,81 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* Input de Texto */}
+            {/* Input de Texto com Controles de Voz */}
             <div style={{ display: "flex", gap: 10 }}>
-              <input
-                className={styles.input}
-                style={{ flex: 1, margin: 0 }}
-                placeholder={t.aiInputHolder}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSendAiMessage()}
-                disabled={aiLoading}
-              />
+              <div style={{ position: "relative", flex: 1, display: "flex", alignItems: "center" }}>
+                <input
+                  className={styles.input}
+                  style={{ flex: 1, margin: 0, paddingRight: 90 }}
+                  placeholder={t.aiInputHolder}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSendAiMessage()}
+                  disabled={aiLoading}
+                />
+                
+                {/* Botões Absolutos: Microfone e Alto-falante */}
+                <div style={{ position: "absolute", right: 10, display: "flex", gap: 6, alignItems: "center" }}>
+                  {/* Botão de Microfone */}
+                  <button
+                    onClick={toggleRecording}
+                    disabled={aiLoading}
+                    title={lang === "pt" ? "Falar com a IA" : "Parla con l'IA"}
+                    style={{
+                      background: isRecording ? "rgba(239, 68, 68, 0.2)" : "transparent",
+                      border: "none",
+                      borderRadius: "50%",
+                      width: 32,
+                      height: 32,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: isRecording ? "#ef4444" : "rgba(255, 255, 255, 0.55)",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      animation: isRecording ? "pulse 1.2s infinite alternate" : "none"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width={16} height={16}>
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill={isRecording ? "#ef4444" : "none"} />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
+                    </svg>
+                  </button>
+
+                  {/* Botão de Ativação/Desativação de Resposta Falada */}
+                  <button
+                    onClick={toggleVoiceFeedback}
+                    title={lang === "pt" ? "Alternar Resposta por Voz" : "Attiva/Disattiva risposta vocale"}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      borderRadius: "50%",
+                      width: 32,
+                      height: 32,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: isVoiceEnabled ? "#a78bfa" : "rgba(255, 255, 255, 0.35)",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {isVoiceEnabled ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width={16} height={16}>
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width={16} height={16}>
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <line x1="23" y1="9" x2="17" y2="15" />
+                        <line x1="17" y1="9" x2="23" y2="15" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
               <button
                 onClick={() => handleSendAiMessage()}
                 disabled={aiLoading || !chatInput.trim()}
